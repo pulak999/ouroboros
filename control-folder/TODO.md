@@ -39,6 +39,36 @@
 - [ ] Wire GEPA to richer candidate space (thresholds) once inference is configurable
 - [x] CI workflow (optional): `.github/workflows/optimizer-plan-v2-phase0.yml` — `SKIP_LIVE=1` smoke (unittest + dry-run) on Ubuntu
 
+### SkyDiscover as a multi-algorithm successor to `gepa_runner.py`
+
+Vendored at [`skydiscover/`](skydiscover/) (moved in from `gpu-virt/skydiscover`,
+Apache-2.0, own `.git`). SkyDiscover speaks the same `optimize_anything`
+interface as our current GEPA wrapper but also exposes **AdaEvolve**, **EvoX**,
+**OpenEvolve**, **Top-K**, **Beam**, and **Best-of-N** backends behind one CLI
+(`uv run skydiscover-run … --search <algo>`). Same evaluator, swappable
+algorithm — lets us A/B GEPA against AdaEvolve/EvoX on the same harness without
+forking the eval pipeline.
+
+- [ ] **Wrapper:** new `optimizer/skydiscover_runner.py` that wraps
+      `optimizer/evaluate.py` as a SkyDiscover evaluator returning
+      `{"combined_score": replay_success_rate, "artifacts": {…ASI…}}`.
+      Artifacts should carry the replay-failure diagnostics already produced by
+      `metrics.py` so SkyDiscover's reflection prompts see the same ASI the
+      roadmap calls out in Component 6.
+- [ ] **Candidate shape:** treat the candidate as a Python file that emits
+      `handle_offsets.json` (or, later, the broader `spec.json` from
+      `infer/classify.py`). Wrap the JSON inside EVOLVE-BLOCK markers so the
+      surrounding I/O code is left alone.
+- [ ] **Bake-off:** under identical iteration / token budgets, compare
+      `--search gepa` (today's path) vs `--search adaevolve` vs `--search evox`
+      on the `cu_init` → `matmul` ladder. Track replay success, offset
+      agreement vs handwritten baseline, and tokens-to-first-improvement.
+      Record in [VALIDATION.md](VALIDATION.md) alongside the existing GEPA
+      results.
+- [ ] **Blocker:** same GPU requirement as plan-v2 Phase 4+ — evaluator needs
+      `/dev/nvidia*` for capture+replay. Wrapper + dry-run plumbing can be
+      built and unit-tested without a GPU.
+
 ## Branch
 
 - Implement and iterate on `coding-agent-dev` when doing multi-session work;

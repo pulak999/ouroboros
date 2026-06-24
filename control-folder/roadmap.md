@@ -412,6 +412,23 @@ directly. It proposes harness changes, inference heuristics, prompts, or
 templates; the checked-in spec is still produced by deterministic tools
 and accepted only after replay validation.
 
+#### Algorithm backbone: SkyDiscover (vendored under [`skydiscover/`](skydiscover/))
+
+GEPA is one algorithm; the optimizer layer shouldn't be married to it. We
+vendor [SkyDiscover](skydiscover/README.md) (Apache-2.0) as the algorithm
+backbone: it implements the same `optimize_anything`-compatible interface but
+exposes **AdaEvolve**, **EvoX**, **OpenEvolve**, **GEPA**, **Top-K**, **Beam**,
+and **Best-of-N** behind a single CLI/Python API. The evaluator and ASI
+contract above are unchanged — only the search strategy is swappable via
+`--search <algo>`.
+
+This matters because the search problem here is multi-objective and has long
+horizons (replay success vs. handle recall vs. pointer precision vs.
+coverage). SkyDiscover's reported results suggest AdaEvolve gives faster early
+gains and EvoX gives stronger long-horizon gains than GEPA alone on similar
+benchmarks. Worth measuring on our harness rather than committing to GEPA.
+Tracked under [TODO.md → SkyDiscover as a multi-algorithm successor](TODO.md).
+
 ---
 
 ## Proposed Directory Layout

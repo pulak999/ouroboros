@@ -1,0 +1,76 @@
+\relax 
+\providecommand\hyper@newdestlabel[2]{}
+\providecommand\HyField@AuxAddToFields[1]{}
+\providecommand\HyField@AuxAddToCoFields[2]{}
+\@writefile{toc}{\contentsline {section}{\numberline {1}Introduction}{2}{section.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Hardware.}{2}{section*.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {2}System Architecture}{2}{section.2}\protected@file@percent }
+\newlabel{sec:arch}{{2}{2}{System Architecture}{section.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.1}Capture}{2}{subsection.2.1}\protected@file@percent }
+\@writefile{lol}{\contentsline {lstlisting}{\numberline {1}{\ignorespaces Example JSONL trace lines.}}{2}{lstlisting.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.2}Handle-offset Inference}{3}{subsection.2.2}\protected@file@percent }
+\@writefile{lol}{\contentsline {lstlisting}{\numberline {2}{\ignorespaces Fragment of \texttt  {handle\_offsets.json}.}}{3}{lstlisting.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.3}Replay}{3}{subsection.2.3}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces End-to-end pipeline: capture $\to $ handle-offset inference $\to $ replay.}}{3}{figure.caption.3}\protected@file@percent }
+\providecommand*\caption@xref[2]{\@setref\relax\@undefined{#1}}
+\newlabel{fig:pipeline}{{1}{3}{End-to-end pipeline: capture $\to $ handle-offset inference $\to $ replay}{figure.caption.3}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {3}Test Program Ladder}{3}{section.3}\protected@file@percent }
+\newlabel{sec:ladder}{{3}{3}{Test Program Ladder}{section.3}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces CUDA test-program ladder. All programs replay with zero failures using the checked-in \texttt  {handle\_offsets.json}.}}{4}{table.caption.4}\protected@file@percent }
+\newlabel{tab:ladder}{{1}{4}{CUDA test-program ladder. All programs replay with zero failures using the checked-in \texttt {handle\_offsets.json}}{table.caption.4}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {4}Optimizer Harness}{4}{section.4}\protected@file@percent }
+\newlabel{sec:optimizer}{{4}{4}{Optimizer Harness}{section.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.1}Design}{4}{subsection.4.1}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Optimizer harness data flow. The GEPA loop is optional and replaces the inner iteration with LLM-proposed YAML candidates.}}{5}{figure.caption.5}\protected@file@percent }
+\newlabel{fig:optimizer}{{2}{5}{Optimizer harness data flow. The GEPA loop is optional and replaces the inner iteration with LLM-proposed YAML candidates}{figure.caption.5}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.2}Harness YAML Format}{5}{subsection.4.2}\protected@file@percent }
+\@writefile{lol}{\contentsline {lstlisting}{\numberline {3}{\ignorespaces Harness YAML (\texttt  {harness.gepa\_seed.yaml}).}}{5}{lstlisting.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {5}Live Evaluation Results}{5}{section.5}\protected@file@percent }
+\newlabel{sec:live}{{5}{5}{Live Evaluation Results}{section.5}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.1}Baseline Validation}{5}{subsection.5.1}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces Live evaluator results (plan-v2 Phase~4, dev clone, 2026-05-09). All runs: 0 failed, 0 skipped; constraint \texttt  {max\_skip\_regression=0} satisfied.}}{5}{table.caption.6}\protected@file@percent }
+\newlabel{tab:live}{{2}{5}{Live evaluator results (plan-v2 Phase~4, dev clone, 2026-05-09). All runs: 0 failed, 0 skipped; constraint \texttt {max\_skip\_regression=0} satisfied}{table.caption.6}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.2}Unit Test Suite}{6}{subsection.5.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {6}GEPA Reflective Optimisation}{6}{section.6}\protected@file@percent }
+\newlabel{sec:gepa}{{6}{6}{GEPA Reflective Optimisation}{section.6}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.1}Overview}{6}{subsection.6.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.2}Seed Harness}{6}{subsection.6.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.3}Reflection with Llama-3.2-1B (wiring proof)}{6}{subsection.6.3}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces GEPA run with Llama-3.2-1B base model (2026-05-09).}}{6}{table.caption.7}\protected@file@percent }
+\newlabel{tab:llama}{{3}{6}{GEPA run with Llama-3.2-1B base model (2026-05-09)}{table.caption.7}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.4}Reflection with Gemini 2.0 Flash (rate-limited)}{7}{subsection.6.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.5}Reflection with Qwen2.5-7B-Instruct (successful proposal)}{7}{subsection.6.5}\protected@file@percent }
+\newlabel{sec:qwen}{{6.5}{7}{Reflection with Qwen2.5-7B-Instruct (successful proposal)}{subsection.6.5}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {4}{\ignorespaces GEPA run with Qwen2.5-7B-Instruct (2026-05-10).}}{7}{table.caption.8}\protected@file@percent }
+\newlabel{tab:qwen}{{4}{7}{GEPA run with Qwen2.5-7B-Instruct (2026-05-10)}{table.caption.8}{}}
+\@writefile{toc}{\contentsline {paragraph}{Outcome.}{7}{section*.9}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Context-window overflow.}{7}{section*.10}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {7}Engineering Findings}{7}{section.7}\protected@file@percent }
+\newlabel{sec:engineering}{{7}{7}{Engineering Findings}{section.7}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.1}pyairports Namespace Squatter}{7}{subsection.7.1}\protected@file@percent }
+\newlabel{sec:pyairports}{{7.1}{7}{pyairports Namespace Squatter}{subsection.7.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.2}numpy $<$ 2 Requirement}{8}{subsection.7.2}\protected@file@percent }
+\newlabel{sec:numpy}{{7.2}{8}{numpy $<$ 2 Requirement}{subsection.7.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.3}CUDA Graph Pre-allocation and the \texttt  {--enforce-eager} Flag}{8}{subsection.7.3}\protected@file@percent }
+\newlabel{sec:enforce_eager}{{7.3}{8}{CUDA Graph Pre-allocation and the \texttt {--enforce-eager} Flag}{subsection.7.3}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.4}NFS Disk Quota and Model Download}{8}{subsection.7.4}\protected@file@percent }
+\newlabel{sec:nfs}{{7.4}{8}{NFS Disk Quota and Model Download}{subsection.7.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.5}Llama-3.2-1B: Missing Chat Template}{9}{subsection.7.5}\protected@file@percent }
+\newlabel{sec:chat_template}{{7.5}{9}{Llama-3.2-1B: Missing Chat Template}{subsection.7.5}{}}
+\@writefile{lol}{\contentsline {lstlisting}{\numberline {4}{\ignorespaces Minimal chat template (\texttt  {llama\_base\_chat\_template.jinja}).}}{9}{lstlisting.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.6}LLM Hallucination of Non-existent Programs}{9}{subsection.7.6}\protected@file@percent }
+\newlabel{sec:hallucination}{{7.6}{9}{LLM Hallucination of Non-existent Programs}{subsection.7.6}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {8}Score Progression}{9}{section.8}\protected@file@percent }
+\newlabel{sec:scores}{{8}{9}{Score Progression}{section.8}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {5}{\ignorespaces Aggregate score progression across experiments.}}{9}{table.caption.11}\protected@file@percent }
+\newlabel{tab:scores}{{5}{9}{Aggregate score progression across experiments}{table.caption.11}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {9}CI and Smoke Automation}{9}{section.9}\protected@file@percent }
+\newlabel{sec:ci}{{9}{9}{CI and Smoke Automation}{section.9}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {10}Discussion and Future Work}{10}{section.10}\protected@file@percent }
+\newlabel{sec:future}{{10}{10}{Discussion and Future Work}{section.10}{}}
+\@writefile{toc}{\contentsline {paragraph}{Context-window scaling.}{10}{section*.12}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Stronger instruction following.}{10}{section*.13}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Richer candidate space.}{10}{section*.14}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Persistent model cache.}{10}{section*.15}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {11}Conclusion}{10}{section.11}\protected@file@percent }
+\gdef \@abspage@last{10}

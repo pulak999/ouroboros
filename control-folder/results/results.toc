@@ -1,0 +1,36 @@
+\contentsline {section}{\numberline {1}Introduction}{2}{section.1}%
+\contentsline {paragraph}{Hardware.}{2}{section*.2}%
+\contentsline {section}{\numberline {2}System Architecture}{2}{section.2}%
+\contentsline {subsection}{\numberline {2.1}Capture}{2}{subsection.2.1}%
+\contentsline {subsection}{\numberline {2.2}Handle-offset Inference}{3}{subsection.2.2}%
+\contentsline {subsection}{\numberline {2.3}Replay}{3}{subsection.2.3}%
+\contentsline {section}{\numberline {3}Test Program Ladder}{3}{section.3}%
+\contentsline {section}{\numberline {4}Optimizer Harness}{4}{section.4}%
+\contentsline {subsection}{\numberline {4.1}Design}{4}{subsection.4.1}%
+\contentsline {subsection}{\numberline {4.2}Harness YAML Format}{5}{subsection.4.2}%
+\contentsline {section}{\numberline {5}Live Evaluation Results}{5}{section.5}%
+\contentsline {subsection}{\numberline {5.1}Baseline Validation}{5}{subsection.5.1}%
+\contentsline {subsection}{\numberline {5.2}Unit Test Suite}{6}{subsection.5.2}%
+\contentsline {section}{\numberline {6}GEPA Reflective Optimisation}{6}{section.6}%
+\contentsline {subsection}{\numberline {6.1}Overview}{6}{subsection.6.1}%
+\contentsline {subsection}{\numberline {6.2}Seed Harness}{6}{subsection.6.2}%
+\contentsline {subsection}{\numberline {6.3}Reflection with Llama-3.2-1B (wiring proof)}{6}{subsection.6.3}%
+\contentsline {subsection}{\numberline {6.4}Reflection with Gemini 2.0 Flash (rate-limited)}{7}{subsection.6.4}%
+\contentsline {subsection}{\numberline {6.5}Reflection with Qwen2.5-7B-Instruct (successful proposal)}{7}{subsection.6.5}%
+\contentsline {paragraph}{Outcome.}{7}{section*.9}%
+\contentsline {paragraph}{Context-window overflow.}{7}{section*.10}%
+\contentsline {section}{\numberline {7}Engineering Findings}{7}{section.7}%
+\contentsline {subsection}{\numberline {7.1}pyairports Namespace Squatter}{7}{subsection.7.1}%
+\contentsline {subsection}{\numberline {7.2}numpy $<$ 2 Requirement}{8}{subsection.7.2}%
+\contentsline {subsection}{\numberline {7.3}CUDA Graph Pre-allocation and the \texttt {--enforce-eager} Flag}{8}{subsection.7.3}%
+\contentsline {subsection}{\numberline {7.4}NFS Disk Quota and Model Download}{8}{subsection.7.4}%
+\contentsline {subsection}{\numberline {7.5}Llama-3.2-1B: Missing Chat Template}{9}{subsection.7.5}%
+\contentsline {subsection}{\numberline {7.6}LLM Hallucination of Non-existent Programs}{9}{subsection.7.6}%
+\contentsline {section}{\numberline {8}Score Progression}{9}{section.8}%
+\contentsline {section}{\numberline {9}CI and Smoke Automation}{9}{section.9}%
+\contentsline {section}{\numberline {10}Discussion and Future Work}{10}{section.10}%
+\contentsline {paragraph}{Context-window scaling.}{10}{section*.12}%
+\contentsline {paragraph}{Stronger instruction following.}{10}{section*.13}%
+\contentsline {paragraph}{Richer candidate space.}{10}{section*.14}%
+\contentsline {paragraph}{Persistent model cache.}{10}{section*.15}%
+\contentsline {section}{\numberline {11}Conclusion}{10}{section.11}%

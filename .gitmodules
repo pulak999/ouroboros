@@ -1,9 +1,3 @@
-[submodule "open-gpu-kernel-modules"]
-	path = open-gpu-kernel-modules
-	url = https://github.com/NVIDIA/open-gpu-kernel-modules.git
-[submodule "cuda_ioctl_sniffer"]
-	path = cuda_ioctl_sniffer
-	url = https://github.com/geohot/cuda_ioctl_sniffer.git
 [submodule "refs/gepa"]
 	path = refs/gepa
 	url = git@github.com:gepa-ai/gepa.git
