@@ -4,3 +4,12 @@
 [submodule "cuda_ioctl_sniffer"]
 	path = cuda_ioctl_sniffer
 	url = https://github.com/geohot/cuda_ioctl_sniffer.git
+[submodule "refs/gepa"]
+	path = refs/gepa
+	url = git@github.com:gepa-ai/gepa.git
+[submodule "refs/openevolve"]
+	path = refs/openevolve
+	url = git@github.com:algorithmicsuperintelligence/openevolve.git
+[submodule "refs/skydiscover"]
+	path = refs/skydiscover
+	url = git@github.com:skydiscover-ai/skydiscover.git
