@@ -7,3 +7,9 @@
 [submodule "refs/skydiscover"]
 	path = refs/skydiscover
 	url = git@github.com:skydiscover-ai/skydiscover.git
+[submodule "refs/cuda_ioctl_sniffer"]
+	path = refs/cuda_ioctl_sniffer
+	url = https://github.com/geohot/cuda_ioctl_sniffer.git
+[submodule "refs/open-gpu-kernel-modules"]
+	path = refs/open-gpu-kernel-modules
+	url = https://github.com/NVIDIA/open-gpu-kernel-modules.git
