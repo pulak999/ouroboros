@@ -84,13 +84,40 @@ def main() -> None:
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--report", type=Path, default=None,
                     help="optional JSON of admitted+rejected with reasons")
+    ap.add_argument("--probe", type=Path, default=None,
+                    help="abi_probe_all.jsonl — override header sizes with the "
+                         "sizes the shipped driver actually enforces, and drop "
+                         "commands this driver does not have")
     args = ap.parse_args()
 
     doc = json.loads(args.table.read_text(encoding="utf-8"))
     rows = doc["commands"]
 
+    # The 610 headers disagree with the 555 binary on about 12% of sizes, and
+    # they carry no size at all for another 208 commands. When a probe file is
+    # supplied, believe the driver over the header.
+    probe: dict[int, dict] = {}
+    if args.probe:
+        for line in args.probe.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                p = json.loads(line)
+                probe[int(p["cmd"], 16)] = p
+
     admitted, rejected = [], []
     for r in rows:
+        if probe:
+            p = probe.get(r["cmd"])
+            if p is None or not p.get("present"):
+                rejected.append({**r, "_reason": "absent_from_driver"})
+                continue
+            if p.get("probe_status") != "0x0000001F":
+                rejected.append({**r, "_reason": "size_not_enforced"})
+                continue
+            fs = p.get("found_size")
+            if fs is None or fs < 0:
+                rejected.append({**r, "_reason": "driver_size_unknown"})
+                continue
+            r = {**r, "params_size": fs, "_size_source": "driver"}
         ok, why = classify(r)
         (admitted if ok else rejected).append({**r, "_reason": why})
 

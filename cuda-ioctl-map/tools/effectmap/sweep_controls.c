@@ -113,9 +113,22 @@ enum probe_mode { PROBE_NORMAL, PROBE_BADSIZE, PROBE_BADOBJECT, PROBE_BADBOTH };
 #define MAX_CMDS      8192
 #define MAX_PARAM_SZ  (1u << 20)   /* 1 MiB cap; largest real struct is ~64 KiB */
 
+/*
+ * Many NVIDIA GET controls are request-driven: the caller writes the indices it
+ * wants into the params buffer and the driver fills in the values. Sweeping
+ * with an all-zero buffer asks for nothing, so those commands either return
+ * NV_ERR_INVALID_ARGUMENT or hand back a buffer of zeros that never changes.
+ * FB_GET_INFO_V2 is the clearest case: zeroed it fails outright, but with three
+ * indices filled in it reports free framebuffer and tracks a 2 GiB allocation
+ * exactly. A prefill lets the command list carry that request template.
+ */
+#define MAX_PREFILL 512
+
 struct cmd_entry {
     uint32_t cmd;
     uint32_t size;
+    uint32_t prefill_len;
+    uint8_t  prefill[MAX_PREFILL];
 };
 
 static int    g_fd = -1;
@@ -404,20 +417,40 @@ static int load_cmds(const char *path, struct cmd_entry *out, int max)
         fprintf(stderr, "[sweep] open %s: %s\n", path, strerror(errno));
         return -1;
     }
-    char line[256];
+    /* Must hold a full request template: 2 hex chars per byte, plus the cmd,
+     * the size and a trailing comment. A short buffer silently truncates the
+     * template and fgets then re-parses the tail as another command. */
+    char line[4 * MAX_PREFILL + 256];
     int n = 0;
     while (fgets(line, sizeof(line), f) && n < max) {
         char *p = line;
         while (*p == ' ' || *p == '\t') p++;
         if (*p == '#' || *p == '\n' || *p == '\0') continue;
         unsigned long cmd, sz;
-        if (sscanf(p, "%lx %lu", &cmd, &sz) != 2) continue;
+        char hex[2 * MAX_PREFILL + 2];
+        hex[0] = '\0';
+        int nf = sscanf(p, "%lx %lu %2048s", &cmd, &sz, hex);
+        if (nf < 2) continue;
         if (sz > MAX_PARAM_SZ) {
             fprintf(stderr, "[sweep] skip 0x%08lx: size %lu over cap\n", cmd, sz);
             continue;
         }
         out[n].cmd  = (uint32_t)cmd;
         out[n].size = (uint32_t)sz;
+        out[n].prefill_len = 0;
+        /* Third field, when present and not a comment, is a hex request
+         * template written into the head of the params buffer. */
+        if (nf == 3 && hex[0] != '#' && hex[0] != '\0') {
+            size_t hl = strlen(hex);
+            if (hl % 2 == 0 && hl / 2 <= MAX_PREFILL && hl / 2 <= sz) {
+                for (size_t i = 0; i < hl / 2; i++) {
+                    unsigned byte;
+                    if (sscanf(hex + 2 * i, "%2x", &byte) != 1) { hl = 0; break; }
+                    out[n].prefill[i] = (uint8_t)byte;
+                }
+                out[n].prefill_len = (uint32_t)(hl / 2);
+            }
+        }
         n++;
     }
     fclose(f);
@@ -492,6 +525,8 @@ int main(int argc, char **argv)
         uint32_t size = cmds[i].size;
 
         memset(pbuf, 0, size ? size : 1);
+        if (cmds[i].prefill_len)
+            memcpy(pbuf, cmds[i].prefill, cmds[i].prefill_len);
 
         NVOS54_PARAMETERS c;
         memset(&c, 0, sizeof(c));

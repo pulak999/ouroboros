@@ -1,0 +1,51 @@
+--- a/src/nvidia/src/kernel/gpu/gsp/kernel_gsp.c
++++ b/src/nvidia/src/kernel/gpu/gsp/kernel_gsp.c
+@@ -288,6 +288,29 @@
+     return NV_OK;
+ }
+ 
++/*
++ * --- ouroboros rpc trace patch: BEGIN ---
++ * Additive-only large trace log, fed from the same call site as the
++ * existing 8-entry rpcHistory ring below. See tools/effectmap/rpc_tracer/
++ * README.md in the ouroboros repo for how this is read out and decoded.
++ * Locking: _kgspAddRpcHistoryEntry runs under the GPU lock (every RPC
++ * send/recv path in this file asserts rmGpuLockIsOwner()), so the plain,
++ * non-atomic write index here is safe.
++ */
++#define OUROBOROS_RPC_TRACE_LOG_DEPTH (1u << 16)   /* 65536 entries, ~1.5 MiB */
++
++typedef struct
++{
++    NvU64 ts;
++    NvU32 function;
++    NvU64 data0;
++    NvU64 data1;
++} OuroborosRpcTraceEntry;
++
++OuroborosRpcTraceEntry g_ouroborosRpcTraceLog[OUROBOROS_RPC_TRACE_LOG_DEPTH];
++NvU32 g_ouroborosRpcTraceWriteIdx = 0;
++/* --- ouroboros rpc trace patch: END header --- */
++
+ static void
+ _kgspAddRpcHistoryEntry
+ (
+@@ -308,6 +331,18 @@
+     _kgspGetActiveRpcDebugData(pRpc, func,
+                                &pHistory[entry].data[0],
+                                &pHistory[entry].data[1]);
++
++    /* --- ouroboros rpc trace patch: BEGIN body --- */
++    {
++        OuroborosRpcTraceEntry *t =
++            &g_ouroborosRpcTraceLog[g_ouroborosRpcTraceWriteIdx % OUROBOROS_RPC_TRACE_LOG_DEPTH];
++        t->ts       = pHistory[entry].ts_start;
++        t->function = func;
++        t->data0    = pHistory[entry].data[0];
++        t->data1    = pHistory[entry].data[1];
++        g_ouroborosRpcTraceWriteIdx++;
++    }
++    /* --- ouroboros rpc trace patch: END body --- */
+ }
+ 
+ static void

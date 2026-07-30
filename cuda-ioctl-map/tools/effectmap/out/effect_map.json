@@ -1,0 +1,383 @@
+{
+ "rung_delta_map": {
+  "baseline": [],
+  "cuinit": [
+   {
+    "cmd": "0x00801809",
+    "name": "NV0080_CTRL_CMD_DMA_GET_PDE_INFO",
+    "changed_in": 5,
+    "of": 5,
+    "specificity": 0.5
+   },
+   {
+    "cmd": "0x20801108",
+    "name": "NV2080_CTRL_CMD_FIFO_GET_PHYSICAL_CHANNEL_COUNT",
+    "changed_in": 5,
+    "of": 5,
+    "specificity": 0.5
+   },
+   {
+    "cmd": "0x20803602",
+    "name": "NV2080_CTRL_CMD_GSP_GET_RM_HEAP_STATS",
+    "changed_in": 5,
+    "of": 5,
+    "specificity": 0.5
+   },
+   {
+    "cmd": "0x20801303",
+    "name": "NV2080_CTRL_CMD_FB_GET_INFO_V2",
+    "changed_in": 5,
+    "of": 5,
+    "specificity": 0.2
+   }
+  ],
+  "ctx_create": [
+   {
+    "cmd": "0x2080121C (status)",
+    "name": "NV2080_CTRL_CMD_GR_GET_CURRENT_RESIDENT_CHANNEL",
+    "changed_in": 5,
+    "of": 5,
+    "specificity": 1.0
+   },
+   {
+    "cmd": "0x00801809",
+    "name": "NV0080_CTRL_CMD_DMA_GET_PDE_INFO",
+    "changed_in": 5,
+    "of": 5,
+    "specificity": 0.5
+   },
+   {
+    "cmd": "0x20801108",
+    "name": "NV2080_CTRL_CMD_FIFO_GET_PHYSICAL_CHANNEL_COUNT",
+    "changed_in": 5,
+    "of": 5,
+    "specificity": 0.5
+   },
+   {
+    "cmd": "0x20803602",
+    "name": "NV2080_CTRL_CMD_GSP_GET_RM_HEAP_STATS",
+    "changed_in": 5,
+    "of": 5,
+    "specificity": 0.5
+   },
+   {
+    "cmd": "0x20801303",
+    "name": "NV2080_CTRL_CMD_FB_GET_INFO_V2",
+    "changed_in": 5,
+    "of": 5,
+    "specificity": 0.2
+   }
+  ],
+  "mem_1m": [
+   {
+    "cmd": "0x20801303",
+    "name": "NV2080_CTRL_CMD_FB_GET_INFO_V2",
+    "changed_in": 5,
+    "of": 5,
+    "specificity": 0.2
+   }
+  ],
+  "mem_2g": [
+   {
+    "cmd": "0x20801303",
+    "name": "NV2080_CTRL_CMD_FB_GET_INFO_V2",
+    "changed_in": 5,
+    "of": 5,
+    "specificity": 0.2
+   }
+  ],
+  "stream": [
+   {
+    "cmd": "0x20801303",
+    "name": "NV2080_CTRL_CMD_FB_GET_INFO_V2",
+    "changed_in": 5,
+    "of": 5,
+    "specificity": 0.2
+   }
+  ],
+  "module": [],
+  "launch": []
+ },
+ "reps": 5,
+ "k": 3,
+ "noise_mask": [
+  "0x00000603",
+  "0x20800403"
+ ],
+ "ops": [
+  "baseline",
+  "cuinit",
+  "ctx_create",
+  "mem_1m",
+  "mem_2g",
+  "stream",
+  "module",
+  "launch"
+ ],
+ "correctness_check": {
+  "check": "cuMemAlloc(2GiB) must change framebuffer accounting",
+  "fb_commands_watched": [
+   "0x20801301",
+   "0x20801303"
+  ],
+  "fb_commands_changed": [
+   "0x20801303"
+  ],
+  "passed": true
+ },
+ "effect_map": {
+  "baseline": [],
+  "cuinit": [
+   {
+    "cmd": "0x00801809",
+    "name": "NV0080_CTRL_CMD_DMA_GET_PDE_INFO",
+    "changed_in": 5,
+    "of": 5,
+    "specificity": 0.143
+   },
+   {
+    "cmd": "0x20801108",
+    "name": "NV2080_CTRL_CMD_FIFO_GET_PHYSICAL_CHANNEL_COUNT",
+    "changed_in": 5,
+    "of": 5,
+    "specificity": 0.143
+   },
+   {
+    "cmd": "0x20801303",
+    "name": "NV2080_CTRL_CMD_FB_GET_INFO_V2",
+    "changed_in": 5,
+    "of": 5,
+    "specificity": 0.143
+   },
+   {
+    "cmd": "0x20803602",
+    "name": "NV2080_CTRL_CMD_GSP_GET_RM_HEAP_STATS",
+    "changed_in": 5,
+    "of": 5,
+    "specificity": 0.143
+   }
+  ],
+  "ctx_create": [
+   {
+    "cmd": "0x2080121C (status)",
+    "name": "NV2080_CTRL_CMD_GR_GET_CURRENT_RESIDENT_CHANNEL",
+    "changed_in": 5,
+    "of": 5,
+    "specificity": 0.167
+   },
+   {
+    "cmd": "0x00801809",
+    "name": "NV0080_CTRL_CMD_DMA_GET_PDE_INFO",
+    "changed_in": 5,
+    "of": 5,
+    "specificity": 0.143
+   },
+   {
+    "cmd": "0x20801108",
+    "name": "NV2080_CTRL_CMD_FIFO_GET_PHYSICAL_CHANNEL_COUNT",
+    "changed_in": 5,
+    "of": 5,
+    "specificity": 0.143
+   },
+   {
+    "cmd": "0x20801303",
+    "name": "NV2080_CTRL_CMD_FB_GET_INFO_V2",
+    "changed_in": 5,
+    "of": 5,
+    "specificity": 0.143
+   },
+   {
+    "cmd": "0x20803602",
+    "name": "NV2080_CTRL_CMD_GSP_GET_RM_HEAP_STATS",
+    "changed_in": 5,
+    "of": 5,
+    "specificity": 0.143
+   }
+  ],
+  "mem_1m": [
+   {
+    "cmd": "0x2080121C (status)",
+    "name": "NV2080_CTRL_CMD_GR_GET_CURRENT_RESIDENT_CHANNEL",
+    "changed_in": 5,
+    "of": 5,
+    "specificity": 0.167
+   },
+   {
+    "cmd": "0x00801809",
+    "name": "NV0080_CTRL_CMD_DMA_GET_PDE_INFO",
+    "changed_in": 5,
+    "of": 5,
+    "specificity": 0.143
+   },
+   {
+    "cmd": "0x20801108",
+    "name": "NV2080_CTRL_CMD_FIFO_GET_PHYSICAL_CHANNEL_COUNT",
+    "changed_in": 5,
+    "of": 5,
+    "specificity": 0.143
+   },
+   {
+    "cmd": "0x20801303",
+    "name": "NV2080_CTRL_CMD_FB_GET_INFO_V2",
+    "changed_in": 5,
+    "of": 5,
+    "specificity": 0.143
+   },
+   {
+    "cmd": "0x20803602",
+    "name": "NV2080_CTRL_CMD_GSP_GET_RM_HEAP_STATS",
+    "changed_in": 5,
+    "of": 5,
+    "specificity": 0.143
+   }
+  ],
+  "mem_2g": [
+   {
+    "cmd": "0x2080121C (status)",
+    "name": "NV2080_CTRL_CMD_GR_GET_CURRENT_RESIDENT_CHANNEL",
+    "changed_in": 5,
+    "of": 5,
+    "specificity": 0.167
+   },
+   {
+    "cmd": "0x00801809",
+    "name": "NV0080_CTRL_CMD_DMA_GET_PDE_INFO",
+    "changed_in": 5,
+    "of": 5,
+    "specificity": 0.143
+   },
+   {
+    "cmd": "0x20801108",
+    "name": "NV2080_CTRL_CMD_FIFO_GET_PHYSICAL_CHANNEL_COUNT",
+    "changed_in": 5,
+    "of": 5,
+    "specificity": 0.143
+   },
+   {
+    "cmd": "0x20801303",
+    "name": "NV2080_CTRL_CMD_FB_GET_INFO_V2",
+    "changed_in": 5,
+    "of": 5,
+    "specificity": 0.143
+   },
+   {
+    "cmd": "0x20803602",
+    "name": "NV2080_CTRL_CMD_GSP_GET_RM_HEAP_STATS",
+    "changed_in": 5,
+    "of": 5,
+    "specificity": 0.143
+   }
+  ],
+  "stream": [
+   {
+    "cmd": "0x2080121C (status)",
+    "name": "NV2080_CTRL_CMD_GR_GET_CURRENT_RESIDENT_CHANNEL",
+    "changed_in": 5,
+    "of": 5,
+    "specificity": 0.167
+   },
+   {
+    "cmd": "0x00801809",
+    "name": "NV0080_CTRL_CMD_DMA_GET_PDE_INFO",
+    "changed_in": 5,
+    "of": 5,
+    "specificity": 0.143
+   },
+   {
+    "cmd": "0x20801108",
+    "name": "NV2080_CTRL_CMD_FIFO_GET_PHYSICAL_CHANNEL_COUNT",
+    "changed_in": 5,
+    "of": 5,
+    "specificity": 0.143
+   },
+   {
+    "cmd": "0x20801303",
+    "name": "NV2080_CTRL_CMD_FB_GET_INFO_V2",
+    "changed_in": 5,
+    "of": 5,
+    "specificity": 0.143
+   },
+   {
+    "cmd": "0x20803602",
+    "name": "NV2080_CTRL_CMD_GSP_GET_RM_HEAP_STATS",
+    "changed_in": 5,
+    "of": 5,
+    "specificity": 0.143
+   }
+  ],
+  "module": [
+   {
+    "cmd": "0x2080121C (status)",
+    "name": "NV2080_CTRL_CMD_GR_GET_CURRENT_RESIDENT_CHANNEL",
+    "changed_in": 5,
+    "of": 5,
+    "specificity": 0.167
+   },
+   {
+    "cmd": "0x00801809",
+    "name": "NV0080_CTRL_CMD_DMA_GET_PDE_INFO",
+    "changed_in": 5,
+    "of": 5,
+    "specificity": 0.143
+   },
+   {
+    "cmd": "0x20801108",
+    "name": "NV2080_CTRL_CMD_FIFO_GET_PHYSICAL_CHANNEL_COUNT",
+    "changed_in": 5,
+    "of": 5,
+    "specificity": 0.143
+   },
+   {
+    "cmd": "0x20801303",
+    "name": "NV2080_CTRL_CMD_FB_GET_INFO_V2",
+    "changed_in": 5,
+    "of": 5,
+    "specificity": 0.143
+   },
+   {
+    "cmd": "0x20803602",
+    "name": "NV2080_CTRL_CMD_GSP_GET_RM_HEAP_STATS",
+    "changed_in": 5,
+    "of": 5,
+    "specificity": 0.143
+   }
+  ],
+  "launch": [
+   {
+    "cmd": "0x2080121C (status)",
+    "name": "NV2080_CTRL_CMD_GR_GET_CURRENT_RESIDENT_CHANNEL",
+    "changed_in": 5,
+    "of": 5,
+    "specificity": 0.167
+   },
+   {
+    "cmd": "0x00801809",
+    "name": "NV0080_CTRL_CMD_DMA_GET_PDE_INFO",
+    "changed_in": 5,
+    "of": 5,
+    "specificity": 0.143
+   },
+   {
+    "cmd": "0x20801108",
+    "name": "NV2080_CTRL_CMD_FIFO_GET_PHYSICAL_CHANNEL_COUNT",
+    "changed_in": 5,
+    "of": 5,
+    "specificity": 0.143
+   },
+   {
+    "cmd": "0x20801303",
+    "name": "NV2080_CTRL_CMD_FB_GET_INFO_V2",
+    "changed_in": 5,
+    "of": 5,
+    "specificity": 0.143
+   },
+   {
+    "cmd": "0x20803602",
+    "name": "NV2080_CTRL_CMD_GSP_GET_RM_HEAP_STATS",
+    "changed_in": 5,
+    "of": 5,
+    "specificity": 0.143
+   }
+  ]
+ }
+}

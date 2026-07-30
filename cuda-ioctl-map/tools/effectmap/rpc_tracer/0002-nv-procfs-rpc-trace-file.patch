@@ -1,0 +1,85 @@
+--- a/kernel-open/nvidia/nv-procfs.c
++++ b/kernel-open/nvidia/nv-procfs.c
+@@ -70,6 +70,71 @@
+ 
+ static int nv_procfs_read_registry(struct seq_file *s, void *v);
+ 
++/*
++ * --- ouroboros rpc trace patch: BEGIN ---
++ * Reads out the large RPC trace log added to kernel_gsp.c (RM core) by the
++ * companion 0001-kernel_gsp-rpc-trace-log.patch. That patch and this one
++ * must be applied together; the struct layout below must match it exactly.
++ * See tools/effectmap/rpc_tracer/README.md in the ouroboros repo.
++ */
++#define OUROBOROS_RPC_TRACE_LOG_DEPTH (1u << 16)
++
++typedef struct
++{
++    NvU64 ts;
++    NvU32 function;
++    NvU64 data0;
++    NvU64 data1;
++} OuroborosRpcTraceEntry;
++
++extern OuroborosRpcTraceEntry g_ouroborosRpcTraceLog[OUROBOROS_RPC_TRACE_LOG_DEPTH];
++extern NvU32 g_ouroborosRpcTraceWriteIdx;
++
++static int
++nv_procfs_read_rpc_trace(
++    struct seq_file *s,
++    void *v
++)
++{
++    NvU32 total = g_ouroborosRpcTraceWriteIdx;
++    NvU32 start = (total > OUROBOROS_RPC_TRACE_LOG_DEPTH)
++                      ? (total - OUROBOROS_RPC_TRACE_LOG_DEPTH) : 0;
++    NvU32 i;
++
++    seq_printf(s, "# ts function data0 data1\n");
++    seq_printf(s, "# total_entries_ever_written=%u depth=%u dropped=%u\n",
++               total, OUROBOROS_RPC_TRACE_LOG_DEPTH, start);
++
++    for (i = start; i < total; i++)
++    {
++        OuroborosRpcTraceEntry *e =
++            &g_ouroborosRpcTraceLog[i % OUROBOROS_RPC_TRACE_LOG_DEPTH];
++        seq_printf(s, "%llu %u 0x%llx %llu\n",
++                   (unsigned long long)e->ts, e->function,
++                   (unsigned long long)e->data0,
++                   (unsigned long long)e->data1);
++    }
++    return 0;
++}
++
++static int
++nv_procfs_open_rpc_trace(
++    struct inode *inode,
++    struct file *file
++)
++{
++    return single_open(file, nv_procfs_read_rpc_trace, NULL);
++}
++
++static nv_proc_ops_t nv_procfs_rpc_trace_fops = {
++     NV_PROC_OPS_SET_OWNER()
++    .NV_PROC_OPS_OPEN    = nv_procfs_open_rpc_trace,
++    .NV_PROC_OPS_READ    = seq_read,
++    .NV_PROC_OPS_LSEEK   = seq_lseek,
++    .NV_PROC_OPS_RELEASE = single_release,
++};
++/* --- ouroboros rpc trace patch: END --- */
++
+ #define NV_NUMA_STATUS_MSG_LEN      (32)
+ #define NV_PROC_WRITE_BUFFER_SIZE   (512 * PAGE_SIZE)
+ 
+@@ -1329,6 +1394,10 @@
+     if (!entry)
+         goto failed;
+ 
++    entry = NV_CREATE_PROC_FILE("rpc_trace", proc_nvidia, rpc_trace, NULL);
++    if (!entry)
++        goto failed;
++
+ #if defined(CONFIG_PM)
+     entry = NV_CREATE_PROC_FILE("suspend_depth", proc_nvidia, suspend_depth, NULL);
+     if (!entry)
