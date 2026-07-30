@@ -190,3 +190,193 @@ Titan); the repo cannot start that server for you from CI without GPU runners.
 | Merge `coding-agent-dev` → `main` | **Yes** — git only | Only if user confirms live validation is acceptable |
 | Phase 1 / Phase 6 (scratch clone) | **No** — operator-only | No in-repo change needed |
 | Improve error handling / robustness in scripts | **Possible** | Only if user identifies specific gaps |
+
+---
+
+## Code Review — commit 5a418e1a6dafa9435514f9842ca9438f8065eae1 (2026-07-30)
+
+Scope: review in service of `control-folder/plans/effect-map-experiment-v1.md`
+(Experiment A — state-delta effect map). Written in ADS-STE100 Simplified
+Technical English.
+
+### Phase 1 — Repo overview
+
+The repo has three layers:
+
+| Layer | Path | Owns |
+|---|---|---|
+| Control | `control-folder/` | Plans, docs, logs. No code. |
+| Engine (`gopher`) | `cuda-ioctl-map/` | Capture, inference, replay, optimizer. ~2.7 kLOC. |
+| Vendored refs | `refs/` | 5 git submodules. Read-only. |
+
+Execution starts in three places: `run.sh` (capture and replay),
+`optimizer/evaluate.py` (the fitness function), `optimizer/gepa_runner.py`
+(the evolutionary driver).
+
+The data object that flows through the system is a JSONL trace record:
+`{type, seq, fd, dev, req, sz, before, after, ret}`. Every downstream stage
+reads this record.
+
+The architecture is a pipeline inside an evolutionary loop. This agrees with
+the plan.
+
+**Structural flag 1 — version skew in the vendored SDK.**
+`refs/open-gpu-kernel-modules` is at tag **610.43.02**. The host `hulk` runs
+driver **555.42.02** (`modinfo nvidia`). The plan (§4 B1) assumes the open
+module is 555.42.02. It is not. All command tables taken from these headers
+are 610 tables. This makes the plan's size oracle (§3 A1) more necessary, not
+less: the oracle measures precisely this drift.
+
+**Structural flag 2 — command counts in the plan do not match the headers.**
+
+| Quantity | Plan §0/§2 | Measured in `refs/open-gpu-kernel-modules` |
+|---|---|---|
+| Total `*_CTRL_CMD_*` | 2445 | **2899** |
+| `GET_*` readable | 969 | **1178** |
+| NV2080 `GET` | 324 | **428** |
+| NV2080 total | — | 936 |
+
+The plan's numbers are low by about 20%. The likely cause is the version skew
+plus a different grep. Use the measured numbers.
+
+### Phase 2 — File-by-file
+
+**`intercept/nv_sniff.c` (271 lines) — LD_PRELOAD tracer.**
+Responsibility: log every `open`/`openat`/`close`/`ioctl` on `/dev/nvidia*`.
+Correct in the main path. Three defects:
+
+- **F1 (high) — out-of-bounds read.** Line 219: `sz = _NV_IOC_SIZE(request)`;
+  line 220 sets `sz = MAX_CAPTURE_SZ` (4096) when the encoded size is 0. Line
+  237 then does `memcpy(before_buf, arg, sz)`. For every UVM ioctl the encoded
+  size is 0, so the tracer reads 4096 bytes from a buffer that is usually much
+  smaller. This reads adjacent stack or heap. It has not crashed yet, but it is
+  undefined behaviour, and it is the direct cause of the "stack noise" that
+  makes `find_handle_offsets.py` exclude all UVM ioctls (that file, line 17).
+  The exclusion is a workaround for this bug, not a property of UVM.
+- **F2 (medium) — `errno` is not recorded.** The record has `ret` but no
+  `errno`. The plan's size oracle (§3 A1) discriminates three outcomes by
+  error code. For NVIDIA RM the status is in the params struct, so the oracle
+  still works, but the general trace loses information that cannot be
+  recovered later.
+- **F3 (low) — the tracer does not follow the `params` pointer.** For
+  `NV_ESC_RM_CONTROL` the 32-byte struct holds `NvP64 params` — a *pointer* to
+  the real payload. The tracer logs the pointer value, never the payload. So
+  every trace in `sniffed/` records that a control fired and with which `cmd`,
+  but **not what the control returned**. This is the single largest gap
+  between the current tracer and Experiment A.
+
+**`lookup/ioctl_table.json` and `CUDA_IOCTL_MAP.md` — the naming layer.**
+
+- **F4 (critical) — the escape-code names are wrong.** The table was written
+  from model recall, not from the header, although each row claims
+  `"source":"nv-ioctl-numbers.h"`. The escape number is the low byte of the
+  ioctl `nr` field, with magic `'F'` (0x46, from
+  `kernel-open/common/inc/nv-ioctl-numbers.h`). Compare the table against
+  `src/nvidia/arch/nvalloc/unix/include/nv_escape.h`:
+
+  | Code | `ioctl_table.json` says | `nr` | `nv_escape.h` says | Verdict |
+  |---|---|---|---|---|
+  | `0xC020462A` | `NV_ESC_RM_ALLOC` | 0x2A | **`NV_ESC_RM_CONTROL`** | WRONG |
+  | `0xC0104629` | `NV_ESC_RM_CONTROL` | 0x29 | **`NV_ESC_RM_FREE`** | WRONG |
+  | `0xC020462B` | `NV_ESC_RM_ALLOC_MEMORY` | 0x2B | **`NV_ESC_RM_ALLOC`** | WRONG |
+  | `0xC030462B` | `NV_ESC_RM_ALLOC (large)` | 0x2B | `NV_ESC_RM_ALLOC` | right by luck |
+  | `0xC038464E` | `NV_ESC_RM_VID_HEAP_CONTROL` | 0x4E | **`NV_ESC_RM_MAP_MEMORY`** | WRONG |
+  | `0xC018462D` | `NV_ESC_RM_FREE` | 0x2D | *no such escape* | WRONG |
+
+  The mislabelled `0xC020462A` is the **most frequent ioctl in the whole
+  corpus** — 178 of 230 calls in `cu_init`. The project has been calling its
+  busiest call by the wrong name.
+
+  Proof by decode: reading the 32-byte `before` buffer of `0xC020462A` as
+  `NVOS54_PARAMETERS {hClient, hObject, cmd, flags, params, paramsSize,
+  status}` gives consistent handles (`0xc1d00e25`/`0xc1d00e26`), valid class
+  prefixes in `cmd` (`0x0000xxxx` root, `0x0080xxxx` device, `0x2080xxxx`
+  subdevice), `status = 0`, and `ret = 0` on all 178 records. No other layout
+  decodes this cleanly.
+
+  `CUDA_IOCTL_MAP.md` inherits every one of these errors, and that file is
+  cited as the project's ioctl reference.
+
+**`tools/find_handle_offsets.py` (287 lines) — handle inference.**
+Diffs `before` buffers of two runs; a 4-byte window that varies is a candidate
+handle. The pointer filter (upper half in `0x00007f00–0x00007fff`) is a sound
+heuristic. Two flags: the UVM exclusion is a symptom of F1; and
+`MIN_VARY_FRACTION = 0.05` is unjustified — no experiment fixed that value.
+
+**`replay/replay.py` (213 lines) — replay engine.** Reads a trace, re-opens
+devices, re-issues each ioctl with patched handles. Prints
+`DONE — n/m succeeded, f failed, s skipped`. Sound. Note it replays the
+32-byte control struct with a **stale userspace `params` pointer** — a
+consequence of F3. The pointer is meaningless in the replay process, so every
+control replay writes its output to whatever that address maps to, or fails.
+Replay "success" for controls is therefore weaker evidence than it appears.
+
+**`optimizer/evaluate.py` (336 lines) and `optimizer/metrics.py` (153 lines) —
+the fitness oracle.** This is the plan's target. `score_gate` returns
+pass/fail on `failed > 0` plus a skip-regression check; the score is
+`handle_offset_agreement_ratio`. Confirmed weaknesses, exactly as plan-v1 §4
+states:
+
+- **F5 (high) — the oracle is gameable by truncation.** Nothing counts
+  coverage. A candidate that emits fewer ioctls and fails none scores the same
+  as, or better than, the golden trace. plan-v1 §4 A4 predicts this; it is
+  real and present in `score_gate`.
+- **F6 (medium) — `build_asi` is a firehose, not a summary.** It ships
+  `replay_stdout[-8000:]` plus `replay_stderr[-4000:]` to the reflection
+  model. This is the "token-efficient — how??" box that plan-v1 §3 marks
+  **Weak**. It is raw tail text, not a canonical diff.
+- **F7 (low) — silent negative scoring.** Line 193 adds `-1.0` and calls
+  `continue` without appending a row. That program then vanishes from
+  `rows` while still moving the aggregate. A failed program is invisible in
+  the report.
+
+**`tools/snapshot_driver_state.sh` + `tools/compare_snapshots.py` — the
+ancestor of Experiment A.** These already do "snapshot, act, snapshot, diff".
+But the snapshot is scraped text from `nvidia-smi -q` and procfs, not the
+ioctl-level control sweep the plan wants, and the noise mask
+(`SKIP_LINE_PATS`) is **hand-written from guesswork**, not measured. The plan's
+A2 replaces this guessed mask with an empirical one. Keep the shape; replace
+the mechanism.
+
+**`optimizer/tests/test_metrics.py`** is the only test. It covers `metrics.py`
+only. There is no test for the tracer, the inference, or the replay engine.
+
+**CI:** one workflow, `.github/workflows/optimizer-plan-v2-phase0.yml`. It runs
+`SKIP_LIVE=1 ./optimizer/scripts/smoke_plan_v2.sh` on `ubuntu-latest`. The CI
+runner has **no GPU**, so CI can only ever check unit tests, imports and dry
+runs. All GPU work is local-only. This division is correct and must stay.
+
+### Phase 3 — Cross-cutting
+
+1. **Inconsistency.** `nv_sniff.c` guarantees only that `before`/`after` hold
+   `_IOC_SIZE(req)` bytes of the *top-level* struct.
+   `find_handle_offsets.py` and `replay.py` both assume that is the whole
+   argument. For `NV_ESC_RM_CONTROL` it is not (F3). Every conclusion the
+   project draws about control commands rests on this unstated assumption.
+2. **Missing piece.** There is no `cmd` decoder. The traces hold 49 distinct
+   `NV2080/NV0080/NV0000` control commands in `cu_init` alone, and nothing in
+   the repo maps a `cmd` word to a name or a struct. The SDK headers in
+   `refs/` supply this for free and are unused.
+3. **Most likely bug site.** `nv_sniff.c` lines 218–240 (F1). It is undefined
+   behaviour on every UVM ioctl, and it silently poisons the inference input.
+4. **Warn a new engineer first:** do not trust `lookup/ioctl_table.json` or
+   `CUDA_IOCTL_MAP.md` (F4). Verify every escape name against
+   `nv_escape.h` + magic `'F'`. Then check the driver version against the
+   vendored SDK tag before quoting any struct.
+
+### Step 0.3 — Cross-reference: plan vs codebase
+
+| Plan step | State in repo | Action |
+|---|---|---|
+| A1 — RM object ladder (client/device/subdevice) | **Not present as code.** But `sniffed/cu_init.jsonl` contains the exact `NV_ESC_RM_ALLOC` sequence that builds it. | Write a new C sweeper. Use the trace as the reference sequence. |
+| A1 — `NV2080_CTRL_CMD_*GET*` table | **Absent.** Headers in `refs/` are unused. | Write a header extractor. Version-skew caveat applies. |
+| A1 — size oracle | **Absent.** | New. Cheap. Run first. |
+| A2 — noise floor | **Partial ancestor** in `compare_snapshots.py`, but the mask is guessed, not measured. | Replace the mechanism; keep the snapshot/diff shape. |
+| A3 — CUDA corpus | **Already built.** `programs/` holds `cu_init`, `cu_ctx_create`, `cu_ctx_destroy`, `cu_mem_alloc`, `cu_memcpy`, `cu_module_load`, `cu_launch_null`, `cu_device_get`. This is 8 of the plan's 9 rows. | Reuse as-is. `cuStreamCreate` is the only gap. |
+| A4 — scoring | **Absent.** | New. |
+| A5 — wire to the loop | Hooks exist (`metrics.py:score_gate`), and F5 confirms the reward hack the plan wants to close. | New scorer feeds `score_gate`. |
+| B — RPC tracer | Blocked. hulk runs the proprietary module (F-flag: `license: NVIDIA`). Confirmed. | Out of scope tonight, as the plan says. |
+
+**Conflicts between the plan and the code:** two, both listed above — the
+command counts (§0/§2) and the open-module version (§4 B1). Neither blocks
+Experiment A. Both are recorded here so the plan can be amended.
