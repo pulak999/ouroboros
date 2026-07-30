@@ -54,3 +54,76 @@ opens.
 - Shell entry point assumes current directory is `cuda-ioctl-map/`.
 - JSONL one JSON object per line; ioctl `req` is a hex string.
 - Handle patching uses 4-byte little-endian fields per `handle_offsets.json`.
+
+## Effect-map tooling (`cuda-ioctl-map/tools/effectmap/`) — added 2026-07-30
+
+Serves `control-folder/plans/effect-map-experiment-v1.md`. Needs **no root**
+and no `libcuda`; it builds the RM object ladder by hand.
+
+```bash
+cd cuda-ioctl-map
+SDK=../refs/open-gpu-kernel-modules/src/common/sdk/nvidia/inc
+
+gcc -O2 -Wall -Wextra -o tools/effectmap/sweep_controls tools/effectmap/sweep_controls.c
+/usr/local/cuda-12.5/bin/nvcc -arch=native -O0 -lcuda \
+    -o tools/effectmap/effect_probe tools/effectmap/effect_probe.cu
+
+# 1. command table from the SDK headers (sizes measured with a compiled probe)
+python3 tools/effectmap/extract_ctrl_table.py --sdk $SDK \
+        --out tools/effectmap/out/ctrl_table.json
+
+# 2. probe the *shipped* driver: presence + true paramsSize for every command
+python3 -c "..."   # see LOG.md for the one-liner that emits all_scan.txt
+./tools/effectmap/sweep_controls --cmds all_scan.txt \
+        --out tools/effectmap/out/abi_probe_all.jsonl --size-scan 65536
+
+# 3. read-only command list, sized from the driver rather than the headers
+python3 tools/effectmap/gen_sweep_list.py \
+        --table tools/effectmap/out/ctrl_table.json \
+        --probe tools/effectmap/out/abi_probe_all.jsonl \
+        --out   tools/effectmap/out/sweep_cmds_555.txt
+python3 tools/effectmap/gen_templates.py \
+        --cmds tools/effectmap/out/sweep_cmds_555.txt \
+        --out  tools/effectmap/out/sweep_cmds_555_tmpl.txt
+
+# 4. A2 noise-floor gate, then A3/A4 effect map
+./tools/effectmap/sweep_controls --cmds tools/effectmap/out/sweep_cmds_555_tmpl.txt \
+        --out tools/effectmap/out/state_vector_run1.jsonl
+./tools/effectmap/sweep_controls --cmds tools/effectmap/out/sweep_cmds_555_tmpl.txt \
+        --out tools/effectmap/out/state_vector_run2.jsonl
+python3 tools/effectmap/noise_floor.py \
+        tools/effectmap/out/state_vector_run{1,2}.jsonl \
+        --report tools/effectmap/out/noise_floor_report.json
+python3 tools/effectmap/run_effect_map.py \
+        --cmds  tools/effectmap/out/sweep_cmds_555_tmpl.txt \
+        --noise tools/effectmap/out/noise_floor_report.json \
+        --reps 5 --out tools/effectmap/out/effect_map.json
+
+# 5. MIG classification report
+python3 tools/effectmap/classify_mig.py \
+        --table tools/effectmap/out/ctrl_table.json \
+        --probe tools/effectmap/out/abi_probe_all.jsonl \
+        --sniffed sniffed/ \
+        --out-json tools/effectmap/out/mig_classification.json \
+        --out-md   ../control-folder/plans/mig-command-classification.md
+```
+
+### Design decisions you must know before touching this
+
+1. **Do not trust `lookup/ioctl_table.json` or `CUDA_IOCTL_MAP.md`.** Their
+   escape-code names are wrong. `0xC020462A` is `NV_ESC_RM_CONTROL`, not
+   `NV_ESC_RM_ALLOC`. Derive names from `nv_escape.h` with magic `'F'`.
+2. **The vendored SDK is 610.43.02; hulk runs 555.42.02.** 12% of paramsSize
+   values differ and 508 of 1675 commands do not exist in 555. Where the
+   driver probe and the header disagree, the driver wins.
+3. **Two oracles, both justified by `control.c:445-456`.** Presence uses a real
+   object and an impossible size (`0x56` absent / `0x1F` present). Size uses a
+   bogus `hObject` so the size check answers before object resolution
+   (`0x57` = accepted size). The bogus-handle form never runs the handler, so
+   it is safe on write commands.
+4. **hulk is shared.** `gen_sweep_list.py` admits a command only if it is
+   positively a read. Keep that filter conservative.
+5. **A zeroed params buffer reads almost nothing.** Many GET controls are
+   request-driven; use `gen_templates.py`.
+6. **Snapshot while the operation is live.** `effect_probe` blocks on stdin so
+   the sweep runs before the context is torn down.

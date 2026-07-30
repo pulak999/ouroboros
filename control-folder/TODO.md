@@ -1,75 +1,61 @@
-# TODO — ioctl-cuda-mapping
+# TODO — Ouroboros
 
-## Done (plan-v1 baseline)
+Ordered by dependency. Status as of 2026-07-30.
 
-- [x] Optimizer harness: `cuda-ioctl-map/optimizer/harness.yaml`
-- [x] Metrics: `optimizer/metrics.py` (replay summary parse, offset diff)
-- [x] Evaluator CLI: `optimizer/evaluate.py`
-- [x] GEPA runner stub: `optimizer/gepa_runner.py` + `requirements.txt`
-- [x] Optimizer README + `runs/` gitignore
-- [x] Unit tests for metrics parsing (`optimizer/tests/test_metrics.py`)
+## Done — effect-map experiment v1 (Experiment A)
 
-## Next (roadmap / follow-up)
+- [x] A1 — command table from the SDK headers (2382 commands, 1221 sized)
+- [x] A1 — RM object ladder without root or libcuda (client/device/subdevice)
+- [x] A1 — size oracle, verified three-way against `control.c:445-456`
+- [x] A1 — **full ABI probe of the shipped 555.42.02 driver**: 508 of 1675
+      commands absent, 1106 true sizes recovered, 112 of 898 (12%) disagree
+      with the 610 headers
+- [x] A2 — noise-floor gate: **PASS**, 142 of 144 stable (98.6%)
+- [x] A3 — effect map over an 8-rung cumulative CUDA ladder, 5 reps
+- [x] A4 — reproducibility, specificity, and the 2 GiB correctness check
+      (**PASS** after the request-template fix)
+- [x] MIG classification report keyed to the shipped driver
 
-### plan-v2 ([plan-v2.md](plan-v2.md)) — split: repo vs operator
+## Next — highest value first
 
-- [x] **In repo:** `optimizer/scripts/smoke_plan_v2.sh` (Phase 0, 4, optional 2–3);
-      `SKIP_LIVE=1` CI-friendly path; [VALIDATION.md](VALIDATION.md) plan-v2 stub
-      + Phase 0 log.
-- [x] **Phase 4 (live evaluate)** on dev clone: full `smoke_plan_v2.sh` without
-      `SKIP_LIVE` — PASS; see [VALIDATION.md](VALIDATION.md) “Phase 4 (live
-      evaluate)”.
-- [x] **Phase 3 (local vLLM + GEPA reflection) — 2026-05-09:** vLLM 0.6.1.post1
-      + `meta-llama/Llama-3.2-1B`, `--api-base http://127.0.0.1:8000/v1`; 3
-      reflection iterations completed end-to-end (HTTP 200 from LLM each time).
-      Model quality insufficient to improve harness (1B base), but wiring proven.
-      See [VALIDATION.md](VALIDATION.md) "Phase 3 (GEPA + local vLLM)".
-- [x] **Phase 3 (Qwen2.5-7B-Instruct) — 2026-05-10:** downloaded to `/tmp/hf_pm3371`;
-      vLLM `--enforce-eager --max-model-len 16384`; GEPA iteration 1 proposed
-      `cu_ctx_create.cu` → score 0.8889 → **0.8926**; accepted; `harness.gepa_seed.yaml`
-      updated.  Iterations 2+ hit context-window overflow (~19k tokens > 16384 limit).
-- [ ] GEPA context overflow: GEPA history accumulates per iteration; mitigate with
-      `--max-metric-calls 3` or use a 32k+ context model (Qwen2.5-14B, quantized 70B).
-- [ ] Phase 6 (scratch clone cleanup): operator step after throwaway clone run.
-- [x] **Phase 3 (Gemini path) — smoke attempt (2026-05-09):** documented in
-      [VALIDATION.md](VALIDATION.md); reflection blocked by Gemini **429**
-      (quota), not auth wiring.
-- [ ] Phase 1 roadmap: generic sniffer device globs + extended JSONL fields
-- [ ] Phase 2: `infer/classify.py` + emitted `spec.json` vs handwritten offsets
-- [ ] Wire GEPA to richer candidate space (thresholds) once inference is configurable
-- [x] CI workflow (optional): `.github/workflows/optimizer-plan-v2-phase0.yml` — `SKIP_LIVE=1` smoke (unittest + dry-run) on Ubuntu
+- [ ] **Regenerate `lookup/ioctl_table.json` from `nv_escape.h`.** It is wrong
+      today and `CUDA_IOCTL_MAP.md` inherits every error. Cheap, and it
+      unblocks trusting any naming downstream. (arch-findings Finding 4)
+- [ ] **Make `abi_probe_all.jsonl` the size authority** for `build_schema.py`
+      and `replay.py`, instead of the headers. (Finding 5)
+- [ ] **Fix `nv_sniff.c` to follow the `params` pointer** for
+      `NV_ESC_RM_CONTROL`. Today every trace records that a control fired but
+      not what it returned. (Finding 1, code.md F3)
+- [ ] **Fix the `nv_sniff.c` out-of-bounds read** — `memcpy` of 4096 bytes when
+      `_IOC_SIZE` is 0. This is the real reason UVM ioctls are excluded from
+      handle inference. (code.md F1)
+- [ ] Wire the rung-delta effect map into `metrics.py` as the Workstream-A1
+      oracle, and add coverage as a first-class objective so a truncated
+      candidate scores worse. (plan-v1 §4 A4, code.md F5)
+- [ ] Replace `build_asi`'s 8000-character stdout tail with the canonical trace
+      diff. (plan-v1 §3 "how??", code.md F6)
 
-### SkyDiscover as a multi-algorithm successor to `gepa_runner.py`
+## Experiment B — GSP RPC tracer (blocked)
 
-Vendored at [`skydiscover/`](skydiscover/) (moved in from `gpu-virt/skydiscover`,
-Apache-2.0, own `.git`). SkyDiscover speaks the same `optimize_anything`
-interface as our current GEPA wrapper but also exposes **AdaEvolve**, **EvoX**,
-**OpenEvolve**, **Top-K**, **Beam**, and **Best-of-N** backends behind one CLI
-(`uv run skydiscover-run … --search <algo>`). Same evaluator, swappable
-algorithm — lets us A/B GEPA against AdaEvolve/EvoX on the same harness without
-forking the eval pipeline.
+- [ ] Rent a Turing/Ampere box with root. **hulk cannot host this**: it runs
+      the proprietary module (`license: NVIDIA`), and the tracer patches the
+      open one. This, not the absence of MIG, is the blocker.
+- [ ] B1 — build and `insmod` the unmodified open module, run a CUDA program.
+      Note the plan says 555.42.02; the vendored submodule is **610.43.02**.
+      Pick one and pin it.
+- [ ] B2 — expose `pRpc->rpcHistory` through debugfs before attempting full
+      message logging.
+- [ ] B3 — correlate against the 24 Tier-3 MIG RPCs listed in
+      `mig-command-classification.md`, whose paramsSize values are already
+      recovered.
 
-- [ ] **Wrapper:** new `optimizer/skydiscover_runner.py` that wraps
-      `optimizer/evaluate.py` as a SkyDiscover evaluator returning
-      `{"combined_score": replay_success_rate, "artifacts": {…ASI…}}`.
-      Artifacts should carry the replay-failure diagnostics already produced by
-      `metrics.py` so SkyDiscover's reflection prompts see the same ASI the
-      roadmap calls out in Component 6.
-- [ ] **Candidate shape:** treat the candidate as a Python file that emits
-      `handle_offsets.json` (or, later, the broader `spec.json` from
-      `infer/classify.py`). Wrap the JSON inside EVOLVE-BLOCK markers so the
-      surrounding I/O code is left alone.
-- [ ] **Bake-off:** under identical iteration / token budgets, compare
-      `--search gepa` (today's path) vs `--search adaevolve` vs `--search evox`
-      on the `cu_init` → `matmul` ladder. Track replay success, offset
-      agreement vs handwritten baseline, and tokens-to-first-improvement.
-      Record in [VALIDATION.md](VALIDATION.md) alongside the existing GEPA
-      results.
-- [ ] **Blocker:** same GPU requirement as plan-v2 Phase 4+ — evaluator needs
-      `/dev/nvidia*` for capture+replay. Wrapper + dry-run plumbing can be
-      built and unit-tested without a GPU.
+## Known gaps in the effect map
 
-## Branch
-
-- Implement and iterate on `coding-agent-dev` when doing multi-session work;
-  merge to `main` after live validation.
+- [ ] `module` and `launch` produce no observable Layer-1 change. Coverage for
+      those rungs must come from the trace diff. (Finding 8)
+- [ ] 6 commands have no accepted size at or below 65536; scan wider or accept
+      they are variable-length.
+- [ ] 55 commands are not size-enforced (the export lookup fails), so their
+      recovered size is meaningless. They are excluded, not solved.
+- [ ] Request templates cover 6 index-list commands. Extend the detection to
+      the full `{count; list[]}` family by struct shape.

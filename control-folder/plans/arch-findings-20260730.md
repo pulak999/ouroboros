@@ -224,3 +224,131 @@ as replay doesn't error out. That's the truncation/reward-hacking gap plan-v1
   doesn't capture — i.e., is there a downstream component that's already
   compensating for Finding 1, making it lower-severity than stated above.
   Check before starting the Finding-1 fix, in case it's partially redundant.
+
+---
+
+## Finding 4 — the naming layer is fabricated, and it names the busiest ioctl wrongly
+
+**Severity: every human-facing artifact in the repo inherits the error.**
+
+`lookup/ioctl_table.json` claims `"source":"nv-ioctl-numbers.h"` on every row.
+The values do not come from that header. The escape number is the low byte of
+the ioctl `nr` field with magic `'F'` (0x46). Against
+`nv_escape.h` and `nv-ioctl-numbers.h`:
+
+| code | repo says | real `nr` | actual |
+|---|---|---|---|
+| `0xC020462A` | `NV_ESC_RM_ALLOC` | 0x2A | **`NV_ESC_RM_CONTROL`** |
+| `0xC0104629` | `NV_ESC_RM_CONTROL` | 0x29 | **`NV_ESC_RM_FREE`** |
+| `0xC020462B` | `NV_ESC_RM_ALLOC_MEMORY` | 0x2B | **`NV_ESC_RM_ALLOC`** |
+| `0xC038464E` | `NV_ESC_RM_VID_HEAP_CONTROL` | 0x4E | **`NV_ESC_RM_MAP_MEMORY`** |
+| `0xC90046C8` | `NV_ESC_ATTACH_GPUS_TO_FD` | 200 | **`NV_ESC_CARD_INFO`** |
+| `0xC00846D6` | `NV_ESC_CARD_INFO` | 214 | **`NV_ESC_SYS_PARAMS`** |
+| `0xC018462D` | `NV_ESC_RM_FREE` | 0x2D | *no such escape* |
+
+`0xC020462A` is 178 of the 230 calls in `cu_init`. The project has been
+calling its busiest ioctl by the wrong name, and `CUDA_IOCTL_MAP.md` repeats
+every error.
+
+Decoding the 32-byte buffer of `0xC020462A` as `NVOS54_PARAMETERS` settles it:
+all 178 records give consistent handles, valid class prefixes in `cmd`
+(`0x0000` root, `0x0080` device, `0x2080` subdevice), `status = 0`, `ret = 0`.
+
+**Action:** regenerate `lookup/ioctl_table.json` from `nv_escape.h`. Until then
+treat both it and `CUDA_IOCTL_MAP.md` as untrusted.
+
+---
+
+## Finding 5 — the driver is a better spec than the headers, and it will answer
+
+**This is the largest architectural opportunity found tonight.**
+
+`control.c:445-456` looks a command up in the NVOC export table and rejects a
+`paramsSize` mismatch *before* it resolves the object at line 516. That gives
+two oracles that need no root, no hardware support, and no headers:
+
+| probe | meaning |
+|---|---|
+| real object, impossible size → `0x56 NOT_SUPPORTED` | command absent from this driver build |
+| real object, impossible size → `0x1F INVALID_ARGUMENT` | command present |
+| bogus `hObject`, scan sizes → `0x57 OBJECT_NOT_FOUND` | this size is the one the driver enforces |
+
+The bogus-handle variant never runs the handler, so it is safe on write
+commands. Measured on 555.42.02, in under two seconds:
+
+- 1675 commands probed; **508 absent** from this driver
+- **1106 true `paramsSize` values recovered** from the shipped binary
+- **112 of 898** comparable sizes (**12%**) disagree with the 610 headers
+- **208** sizes recovered that the headers cannot supply at all
+
+**Why this matters to the thesis.** plan-v1 §1 promises a machine-readable
+spec recovered by black-box differential execution with no hand-authored
+per-ioctl knowledge. This is exactly that, and it is stronger than the current
+pipeline: it needs no capture, no replay, and no libcuda. It should become the
+first stage of `spec.json`, with `parse_trace.py` layering field semantics on
+top of a size table that is already known-correct.
+
+**Action:** make `tools/effectmap/abi_probe_all.jsonl` the size authority for
+`build_schema.py` and `replay.py`. Treat the SDK headers as a naming hint only.
+
+---
+
+## Finding 6 — a zeroed params buffer cannot read this ABI
+
+Measured, not inferred. `NV2080_CTRL_CMD_FB_GET_INFO_V2`:
+
+```
+zeroed request  -> NV_ERR_INVALID_ARGUMENT, no data
+filled request  -> HEAP_FREE = 24603456 KiB idle
+                            = 22337472 KiB with 2 GiB held   (matches nvidia-smi)
+```
+
+A large family of GET controls is request-driven: the params buffer is
+`{ NvU32 count; {NvU32 index, NvU32 data}[] }` and the caller writes the
+indices it wants. Zeroed, `count == 0`, so the command either fails or returns
+a buffer of zeros that never changes.
+
+This is why the first A3 run produced a trivial effect map and failed the A4
+correctness check. It also means the A2 noise-floor result — 98.6% stable — is
+**not** the good news it appears to be on its own: much of that stability is
+constant capability data, not informative state.
+
+**Consequence for the plan.** `effect-map-experiment-v1.md` §3 A1 says "issue
+`NV_ESC_RM_CONTROL` with the header-declared `paramsSize`" and record the
+response. That is not sufficient for this ABI. The state vector needs typed
+request templates. `gen_templates.py` supplies them mechanically from the
+struct shape, so no per-command semantics are hand-authored.
+
+---
+
+## Finding 7 — cumulative rungs cap specificity; diff adjacent rungs instead
+
+With eight cumulative rungs, an operation-versus-baseline diff credits every
+effect of `cuInit` to all seven later rungs, so specificity cannot exceed 1/7
+and the map reads as trivial. That is a property of the metric, not of the GPU.
+
+Diffing rung *i* against rung *i-1* — which plan-v1 §6 already prescribes for
+ioctls — attributes each change to the single operation that was added:
+
+| rung | attributed change | specificity |
+|---|---|---|
+| `ctx_create` | `GR_GET_CURRENT_RESIDENT_CHANNEL` becomes readable | **1.0** |
+| `mem_1m`, `mem_2g` | `FB_GET_INFO_V2` only | 0.2 |
+| `module`, `launch` | nothing observable in Layer 1 | — |
+
+**Action:** the rung-delta view, not the op-vs-baseline view, is the one to
+feed the Workstream-A1 oracle. It is already emitted as `rung_delta_map` in
+`effect_map.json`.
+
+---
+
+## Finding 8 — `module` and `launch` leave no Layer-1 trace
+
+Loading a module and launching a kernel produce **no** reproducible change in
+any of the 144 readable commands. Layer 1 cannot see compute at all; it sees
+allocation and channel residency.
+
+This bounds what an effect-map oracle can score. It does not weaken the A5
+oracle upgrade for memory and context operations, but a candidate that
+mis-handles `cuLaunchKernel` will not be caught by Layer 1. Coverage of that
+rung has to come from the trace diff, or from Experiment B.
