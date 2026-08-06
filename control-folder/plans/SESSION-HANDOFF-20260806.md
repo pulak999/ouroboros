@@ -13,10 +13,78 @@ bandwidth on GPU 1; GPU 2 is untouched).
 
 ---
 
+## 0. STATUS AT HANDOFF
+
+Chunks 1–3 are **committed and pushed**. A1 and A2 are **complete with results**.
+A3 is **implemented and run, with a negative result that needs one more step**.
+
+| Job | State |
+|---|---|
+| A0 provenance | done, pushed |
+| A1 re-probe on 610 | **done, results in §4** |
+| A2 geometry | **done — LTC_COUNT 12, LTS_COUNT 48, published to ARCH.md** |
+| MIG classification regen | done, pushed, now self-labelling |
+| A3 EXEC_REG_OPS | **implemented; returns 0x1F uniformly — see §4.6** |
+| rpc_tracer re-pin | not started |
+| Lane B | not started |
+
+Commits: `63632dd` (chunk 1), `6eb9e19` (A1+A2), `4cd91b1` (MIG regen), plus the
+A3 commit if it landed.
+
+---
+
 ## 1. Where to pick up — do this first
 
-Bash was blocked by the permission classifier mid-run, right before the final
-decode. **Re-run this one command to get the headline result:**
+**Read §0 above, not §2 and §3 below.** Sections 2 and 3 were written mid-run,
+when chunk 2 was still uncommitted. Everything they describe is now committed
+and pushed. They are kept only as a record of what landed in which commit.
+
+Resume at **A3's next step, §4.6** — read `embedded_param_copy.c` and check
+`NVOS54_PARAMETERS.flags`. Then the rpc_tracer re-pin, then Lane B.
+
+<details>
+<summary>Superseded: the decode command that was pending when Bash was blocked
+(it has since been run; the result is in §4.7 and in ARCH.md)</summary>
+
+```bash
+cd /home/pm3371/gitrepos/ouroboros/cuda-ioctl-map
+python3 - <<'PY'
+import json, re, struct, pathlib
+hdr = pathlib.Path("../refs/open-gpu-kernel-modules/src/common/sdk/nvidia/inc/ctrl/ctrl2080/ctrl2080fb.h").read_text()
+NAMES={}
+for m in re.finditer(r"^#define NV2080_CTRL_FB_INFO_INDEX_([A-Z0-9_]+)\s+\(0x000000([0-9A-Fa-f]{2})U\)", hdr, re.M):
+    NAMES.setdefault(int(m.group(2),16), m.group(1))
+for ln in open("tools/effectmap/out/state_vector_610_run1.jsonl"):
+    r=json.loads(ln)
+    if r.get("cmd","").lower()=="0x20801303": break
+b=bytes.fromhex(r["resp"]); n=struct.unpack_from("<I",b,0)[0]
+rows=[struct.unpack_from("<II",b,4+8*i) for i in range(min(n,(len(b)-4)//8))]
+print(f"{n} indices requested, {sum(1 for _,d in rows if d)} populated")
+for idx,dat in rows:
+    if dat: print(f" 0x{idx:02x}  {NAMES.get(idx,'(undefined)'):34} {dat:>14}")
+PY
+```
+</details>
+
+## 4.7 A2 result — the TU102 L2 geometry (published to ARCH.md)
+
+```
+PARTITION_COUNT  6      FBP_COUNT   6      PARTITION_MASK/FBP_MASK  0x3F
+LTC_COUNT       12      LTS_COUNT  48      LTC_MASK                 0xFFF
+PSEUDO_CHANNEL_MODE 0   L2CACHE_ONLY_MODE 0
+BUS_WIDTH      384      L2CACHE_SIZE 6 MiB (128 KiB per slice)
+RAM_TYPE        17 (GDDR6)   RAM_SIZE 24 GiB
+```
+
+Resolves the "6 or 12 channels" question: 6 FBP → 12 LTC (2 per FBP) → 48 LTS
+(4 per LTC); 384-bit / 12 LTC = 32 bits each, so **12 × 32-bit channels**.
+`m13-bw-colouring/PLAN.md`'s assumption is confirmed by measurement.
+
+**Neither 12 nor 48 is a power of two** — both carry a factor of 3. So the
+address-to-channel map cannot be a bit-slice; it needs a modulo or a hash. Lane
+B's E1 must sweep for periodicity **at 12 and 48**, not at powers of two.
+
+**Old text follows, superseded:**
 
 ```bash
 cd /home/pm3371/gitrepos/ouroboros/cuda-ioctl-map
@@ -269,3 +337,51 @@ A **second session** is working in the same tree. It owns:
 Those were deliberately left out of `63632dd`. Do not commit them without
 checking whether that session has finished. Re-read any file before editing it —
 several changed on disk mid-edit during this session.
+
+---
+
+## 4.6 A3 — EXEC_REG_OPS: present, but rejecting
+
+**Implemented.** `sweep_controls.c` gained a `--exec-reg-ops <offset>` flag
+(repeatable, up to 64 offsets). It is **read-only by construction**: `regOp` is
+hard-coded to `READ_32` and no flag changes it. Two `_Static_assert`s pin
+`NV2080_CTRL_GPU_REG_OP` at 32 bytes and the params struct at 48, the measured
+driver size.
+
+Run on GPU 0, driver 610.43.02:
+
+```
+reg 0x00000000: status=0x0000001F regStatus=0x00 value=0x00000000   <- PMC_BOOT_0
+reg 0x001404F8: status=0x0000001F regStatus=0x00 value=0x00000000   <- LTC anchor
+reg 0x00140000: status=0x0000001F regStatus=0x00 value=0x00000000
+reg 0x00142000: status=0x0000001F regStatus=0x00 value=0x00000000
+```
+
+`0x1F` is `NV_ERR_INVALID_ARGUMENT`, **uniform across every offset including
+PMC_BOOT_0**, a register that certainly exists. So the call is failing *before*
+offset validation. This is **not** `NV_ERR_INSUFFICIENT_PERMISSIONS` (0x1B), so
+it is not a clean permission denial either.
+
+**The NOPTRS bypass is closed.** `NV2080_CTRL_CMD_GPU_EXEC_REG_OPS_NOPTRS`
+(`0x2080019D`), which embeds the ops array inline and avoids the embedded-pointer
+copy entirely, probes as **absent** on 610 (`0x56 NOT_SUPPORTED`).
+
+**Honest limitation: this does not yet distinguish two hypotheses.**
+
+1. The GSP allowlist refuses the register read.
+2. The params are subtly wrong, so the driver rejects before ever consulting the
+   allowlist.
+
+Hypothesis 2 is live and should be eliminated first. The most likely cause is
+the **embedded-pointer copy path**: `regOps` is a `NvP64` the driver must copy
+in from user space, handled in
+`src/nvidia/src/kernel/rmapi/embedded_param_copy.c`. That file appeared in the
+regops grep and has **not been read yet**.
+
+**Next step, precisely:** read `embedded_param_copy.c`'s handling of
+`NV2080_CTRL_CMD_GPU_EXEC_REG_OPS` and check what it requires — a flag, a
+non-zero `grRouteInfo`, a `regOpCount` bound, or an `NVOS54` flag bit that says
+"this params buffer contains embedded pointers". `NVOS54_PARAMETERS.flags` is
+currently sent as 0 by `rm_control()`; that is the first thing to suspect.
+
+Artifact: `tools/effectmap/out/reg_probe_610.jsonl`.

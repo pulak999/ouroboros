@@ -1,0 +1,5 @@
+{"_meta":{"tool":"sweep_controls --exec-reg-ops","driver":"NVRM version: NVIDIA UNIX x86_64 Kernel Module  610.43.02  Tue May 19 11:18:18 UTC 2026","gpu":0,"cmds":"(register offsets)","unix_time":1786026798}}
+{"reg_offset":"0x00000000","status":"0x0000001F","reg_status":0,"value_lo":0,"value_hi":0}
+{"reg_offset":"0x001404F8","status":"0x0000001F","reg_status":0,"value_lo":0,"value_hi":0}
+{"reg_offset":"0x00140000","status":"0x0000001F","reg_status":0,"value_lo":0,"value_hi":0}
+{"reg_offset":"0x00142000","status":"0x0000001F","reg_status":0,"value_lo":0,"value_hi":0}

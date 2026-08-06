@@ -381,6 +381,88 @@ static void emit_meta(FILE *out, const char *tool, unsigned gpu,
 }
 
 /*
+ * Register-read probe — plan v3 Lane A, job A3.
+ *
+ * NV2080_CTRL_CMD_GPU_EXEC_REG_OPS reads and writes GPU registers directly. It
+ * is the only route to what the closed GSP firmware actually programmed: the
+ * firmware image itself is encrypted (measured — 64 MB at entropy 8.000, see
+ * control-folder/plans/gsp-firmware-re-assessment.md), so reading the registers
+ * it left behind is the only way to observe its decisions.
+ *
+ * READ ONLY, BY CONSTRUCTION. regOp is hard-coded to READ_32 and there is no
+ * flag that changes it. hulk is shared; a stray LTC write would affect every
+ * other user on the box. Do not add a write path here.
+ *
+ * Reachability is an empirical question, not a source one: the Kernel RM
+ * forwards these ops to the GSP, which validates them against an allowlist that
+ * ships inside the encrypted region. Three outcomes are all informative —
+ * data returned, INSUFFICIENT_PERMISSIONS, or the offset rejected.
+ *
+ * This cannot go through gen_sweep_list.py: that filter denies any command name
+ * containing _EXEC, and that denial is correct and must stay (code.md E8).
+ */
+#define CTRL_GPU_EXEC_REG_OPS  0x20800122
+#define REG_OP_READ_32         0x00
+#define REG_OP_TYPE_GLOBAL     0x00
+
+typedef struct {
+    uint8_t  regOp, regType, regStatus, regQuad;
+    uint32_t regGroupMask, regSubGroupMask, regOffset;
+    uint32_t regValueHi, regValueLo, regAndNMaskHi, regAndNMaskLo;
+} NV2080_CTRL_GPU_REG_OP;                  /* 32 bytes */
+
+typedef struct {
+    uint32_t hClientTarget;
+    uint32_t hChannelTarget;
+    uint32_t bNonTransactional;
+    uint32_t reserved00[2];
+    uint32_t regOpCount;
+    uint64_t regOps __attribute__((aligned(8)));
+    uint8_t  grRouteInfo[16] __attribute__((aligned(8)));
+} NV2080_CTRL_GPU_EXEC_REG_OPS_PARAMS;     /* 48 bytes */
+
+static int run_reg_ops_probe(const char *out_path, unsigned gpu,
+                             const uint32_t *offsets, int noffsets)
+{
+    _Static_assert(sizeof(NV2080_CTRL_GPU_REG_OP) == 32, "reg op must be 32 bytes");
+    _Static_assert(sizeof(NV2080_CTRL_GPU_EXEC_REG_OPS_PARAMS) == 48,
+                   "exec_reg_ops params must be 48 bytes, the measured driver size");
+
+    FILE *out = fopen(out_path, "w");
+    if (!out) {
+        fprintf(stderr, "[sweep] open %s: %s\n", out_path, strerror(errno));
+        return 1;
+    }
+    emit_meta(out, "sweep_controls --exec-reg-ops", gpu, "(register offsets)");
+
+    for (int i = 0; i < noffsets; i++) {
+        NV2080_CTRL_GPU_REG_OP op;
+        memset(&op, 0, sizeof(op));
+        op.regOp     = REG_OP_READ_32;
+        op.regType   = REG_OP_TYPE_GLOBAL;
+        op.regOffset = offsets[i];
+
+        NV2080_CTRL_GPU_EXEC_REG_OPS_PARAMS p;
+        memset(&p, 0, sizeof(p));
+        p.regOpCount = 1;
+        p.regOps     = (uint64_t)(uintptr_t)&op;
+
+        int st = rm_control(g_hSubDevice, CTRL_GPU_EXEC_REG_OPS, &p, sizeof(p));
+
+        fprintf(out,
+                "{\"reg_offset\":\"0x%08X\",\"status\":\"0x%08X\","
+                "\"reg_status\":%u,\"value_lo\":%u,\"value_hi\":%u}\n",
+                offsets[i], (uint32_t)st, op.regStatus, op.regValueLo, op.regValueHi);
+        fprintf(stderr,
+                "[sweep] reg 0x%08X: status=0x%08X regStatus=0x%02X value=0x%08X\n",
+                offsets[i], (uint32_t)st, op.regStatus, op.regValueLo);
+    }
+
+    fclose(out);
+    return 0;
+}
+
+/*
  * Size scan — recover the driver's own paramsSize for each command.
  *
  * control.c:445-456 looks the command up in the NVOC export table and compares
@@ -571,6 +653,8 @@ int main(int argc, char **argv)
     unsigned gpu = 0;
     uint32_t size_scan_max = 0;
     enum probe_mode mode = PROBE_NORMAL;
+    uint32_t reg_offsets[64];
+    int      n_reg_offsets = 0;
 
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--cmds") && i + 1 < argc)      cmds_path = argv[++i];
@@ -580,6 +664,14 @@ int main(int argc, char **argv)
          * Only ever feed it read-only commands (see gen_sweep_list.py). */
         else if (!strcmp(argv[i], "--size-scan") && i + 1 < argc)
             size_scan_max = (uint32_t)strtoul(argv[++i], NULL, 0);
+        /* Read-only register probe. Repeatable. See run_reg_ops_probe(). */
+        else if (!strcmp(argv[i], "--exec-reg-ops") && i + 1 < argc) {
+            if (n_reg_offsets >= (int)(sizeof(reg_offsets) / sizeof(reg_offsets[0]))) {
+                fprintf(stderr, "[sweep] too many --exec-reg-ops offsets\n");
+                return 2;
+            }
+            reg_offsets[n_reg_offsets++] = (uint32_t)strtoul(argv[++i], NULL, 0);
+        }
         else if (!strcmp(argv[i], "--probe-mode") && i + 1 < argc) {
             const char *m = argv[++i];
             if      (!strcmp(m, "normal"))    mode = PROBE_NORMAL;
@@ -593,9 +685,17 @@ int main(int argc, char **argv)
             return 2;
         }
     }
-    if (!cmds_path || !out_path) {
-        fprintf(stderr, "[sweep] --cmds and --out are required\n");
+    if (!out_path || (!cmds_path && n_reg_offsets == 0)) {
+        fprintf(stderr, "[sweep] --out is required, plus --cmds or --exec-reg-ops\n");
         return 2;
+    }
+
+    if (n_reg_offsets > 0) {
+        if (build_ladder(gpu) != 0) {
+            fprintf(stderr, "[sweep] could not build the RM object ladder\n");
+            return 1;
+        }
+        return run_reg_ops_probe(out_path, gpu, reg_offsets, n_reg_offsets);
     }
 
     struct cmd_entry *cmds = calloc(MAX_CMDS, sizeof(*cmds));
