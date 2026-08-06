@@ -65,7 +65,7 @@ cd cuda-ioctl-map
 SDK=../refs/open-gpu-kernel-modules/src/common/sdk/nvidia/inc
 
 gcc -O2 -Wall -Wextra -o tools/effectmap/sweep_controls tools/effectmap/sweep_controls.c
-/usr/local/cuda-12.5/bin/nvcc -arch=native -O0 -lcuda \
+nvcc -arch=native -O0 -lcuda \
     -o tools/effectmap/effect_probe tools/effectmap/effect_probe.cu
 
 # 1. command table from the SDK headers (sizes measured with a compiled probe)
@@ -113,9 +113,16 @@ python3 tools/effectmap/classify_mig.py \
 1. **Do not trust `lookup/ioctl_table.json` or `CUDA_IOCTL_MAP.md`.** Their
    escape-code names are wrong. `0xC020462A` is `NV_ESC_RM_CONTROL`, not
    `NV_ESC_RM_ALLOC`. Derive names from `nv_escape.h` with magic `'F'`.
-2. **The vendored SDK is 610.43.02; hulk runs 555.42.02.** 12% of paramsSize
-   values differ and 508 of 1675 commands do not exist in 555. Where the
-   driver probe and the header disagree, the driver wins.
+2. **hulk now runs 610.43.02 — the same version as the vendored SDK.**
+   Measured 2026-08-06 from `/proc/driver/nvidia/version`. This **replaces** the
+   old rule ("SDK is 610, hulk runs 555; 12% of paramsSize values differ; 508 of
+   1675 commands absent"). That measurement was taken against 555.42.02 and is
+   now stale.
+   **Every file under `tools/effectmap/out/` was measured against 555 and must be
+   regenerated before it is cited.** Nothing in the tooling stamps the driver
+   version it measured against, so nothing detects the drift for you.
+   The precedence rule is unchanged: where the driver probe and the header
+   disagree, the driver wins.
 3. **Two oracles, both justified by `control.c:445-456`.** Presence uses a real
    object and an impossible size (`0x56` absent / `0x1F` present). Size uses a
    bogus `hObject` so the size check answers before object resolution
@@ -127,3 +134,71 @@ python3 tools/effectmap/classify_mig.py \
    request-driven; use `gen_templates.py`.
 6. **Snapshot while the operation is live.** `effect_probe` blocks on stdin so
    the sweep runs before the context is torn down.
+
+### Request templates — the three size caps (read before changing `MAX_INDEX`)
+
+`gen_templates.py` builds `{count; (index,data)[]}` request templates. Three
+independent caps govern how many indices you may ask for. Only one of them
+raises an error. Know all three before touching `MAX_INDEX`.
+
+| Cap | Where | Limit for `FB_GET_INFO_V2` | Behaviour when exceeded |
+|---|---|---|---|
+| driver `paramsSize` | `abi_probe_all.jsonl` | 444 bytes = 55 indices | `make_template` silently clamps |
+| `MAX_PREFILL` | `sweep_controls.c:125` | 512 bytes = 63 indices | template **silently dropped**, sweep sends a zeroed buffer |
+| `hex[]` parse buffer | `sweep_controls.c:430` | 1026 bytes = 63 indices | **stack buffer overflow** |
+
+A dropped template is the dangerous case. The sweep then reads nothing, exactly
+the failure `arch-findings-20260730.md` Finding 6 describes, with no warning.
+
+**`MAX_INDEX = 55` is the safe maximum against the current C.** It reaches
+`LTC_COUNT` (0x22), `LTS_COUNT` (0x23), `PSEUDO_CHANNEL_MODE` (0x25) and
+`LTC_MASK` (0x2b). Going to 64 or above overflows via
+`NV2080_CTRL_CMD_GPU_GET_INFO_V2`, whose driver size is 524 and whose capacity is
+therefore 65 — it does not self-clamp the way `FB_GET_INFO_V2` does.
+
+See `code.md`, review at commit `aaf7d18`, findings E1/E2/E3.
+
+### `_EXEC` is denied by the sweep filter, deliberately
+
+`gen_sweep_list.py` rejects any command containing `_EXEC`. That includes
+`NV2080_CTRL_CMD_GPU_EXEC_REG_OPS`. **Do not relax the filter to admit it** —
+that would admit every other exec-class command at the same time. Register-read
+work needs its own explicit code path in `sweep_controls.c`, gated behind its own
+flag, reads only.
+
+### Provenance (required on new outputs)
+
+Every new output file must record the driver version, the GPU model and the git
+SHA it was produced under. The existing `out/` files do not, which is why their
+staleness went unnoticed.
+
+---
+
+## Environment — hulk changed, 2026-08-06
+
+**Measured, not assumed.** Verify before trusting any doc in this repo that names
+a driver or toolkit version.
+
+| Fact | This repo's docs say | Actually |
+|---|---|---|
+| Driver | 555.42.02 | **610.43.02**, built 2026-05-19 |
+| CUDA toolkit | 12.5 at `/usr/local/cuda-12.5` | **gone**; only `/usr/bin/nvcc`, CUDA **12.0** |
+| Memory clocks | one (7001 MHz) | **five**: 7001 / 6501 / 5001 / 810 / 405 |
+| Idle clock | — | **405 MHz memory / 300 MHz SM** until warmed up |
+
+**What this invalidates here.** Everything measured against the 555 binary:
+`out/abi_probe_all.jsonl` (1106 sizes), `mig-command-classification.md`'s
+`driver size` column, and the "12% header-vs-binary drift" result. Design
+decision 2 above — "the vendored SDK is 610.43.02; hulk runs 555.42.02" — is **no
+longer true**. Headers and binary now match, so the size table becomes a
+cross-check rather than a correction. The probe runs in about two seconds;
+re-run steps 1-3 before trusting any size.
+
+**The memory-clock ladder is not a throttle.** `nvidia-smi -i 0 -lmc 5001` returns
+*"Setting locked Memory clocks is not supported for GPU"* — refused by
+**capability**, not permission. Root would not help.
+
+**GPU split while two plans run.** A concurrent session is measuring memory
+bandwidth on **GPU 0** and its results are corrupted by any co-tenant CUDA
+context on that device. **Use GPU 1** from this repo. GPU 2 is untouched. That
+work lives at `gpu-virt/motivation/experiments/m13-bw-colouring/ARCH-v2.md`.

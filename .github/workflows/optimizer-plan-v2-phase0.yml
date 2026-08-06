@@ -4,9 +4,9 @@ name: Optimizer plan-v2 Phase 0
 
 on:
   push:
-    branches: [main, coding-agent-dev]
+    branches: [main, coding-agent-dev, effect-map-experiment-v1]
   pull_request:
-    branches: [main, coding-agent-dev]
+    branches: [main, coding-agent-dev, effect-map-experiment-v1]
 
 defaults:
   run:

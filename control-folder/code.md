@@ -380,3 +380,172 @@ runs. All GPU work is local-only. This division is correct and must stay.
 **Conflicts between the plan and the code:** two, both listed above — the
 command counts (§0/§2) and the open-module version (§4 B1). Neither blocks
 Experiment A. Both are recorded here so the plan can be amended.
+
+---
+
+## Code Review — commit aaf7d185e0d10e933925f5f3647957047c2f3a09 (2026-08-06)
+
+Scope: `cuda-ioctl-map/tools/effectmap/` (2225 lines, added in the three commits
+since the `5a418e1` review and never reviewed). Run for `ouroboros-plan-v3.md`.
+Findings are numbered `E*` so they do not collide with the `F*` series above.
+
+### Phase 1 — repo overview
+
+`tools/effectmap/` is a second, independent path to the specification. It does
+not use the capture/replay loop. It interrogates the loaded driver directly.
+
+Pipeline, in dependency order:
+
+```
+extract_ctrl_table.py  (headers -> ctrl_table.json, sizes by compiled probe)
+        |
+sweep_controls.c --size-scan  (shipped driver -> abi_probe_all.jsonl)
+        |
+gen_sweep_list.py  (safety filter; driver sizes override header sizes)
+        |
+gen_templates.py   (adds request templates for index-list commands)
+        |
+sweep_controls.c   (state_vector_run*.jsonl)
+        |
+noise_floor.py (A2 gate)  ->  run_effect_map.py (A3/A4)  ->  effect_map.json
+                                classify_mig.py -> mig-command-classification.md
+```
+
+`sweep_controls.c` is the only component that opens `/dev/nvidiactl`. Everything
+else is offline data processing. That is a clean separation and it is the main
+reason the subsystem is safe on a shared box.
+
+One record shape throughout: `{cmd,size,ret,errno,status,resp}` for a sweep,
+`{cmd,present,found_size,probe_status,accept_status}` for a probe.
+
+**Structurally odd:** `out/` holds 106k lines of committed run artifacts,
+including a 33k-line `sweep_filter_report.json`. These are measurement outputs
+committed as source. They are the evidence base, so this is defensible, but they
+are also now **stale** — every one was measured against driver 555.42.02 and the
+box runs 610.43.02.
+
+### Phase 2 — file by file
+
+**`sweep_controls.c` (568 lines) — the only driver-facing component.**
+Builds `hClient -> hDevice -> hSubDevice` by hand, replaying the exact
+`GET_PROBED_IDS -> ATTACH_IDS -> open(/dev/nvidiaN)` order that libcuda uses.
+The ladder is read from a real trace, not guessed. Good.
+
+The size-oracle logic is correct and well justified in the comments: presence
+uses a real object (so `0x56` is reachable), size uses a bogus handle (so the
+size check answers before object resolution). Both are safe on write commands.
+
+- **E1 — stack buffer overflow in `load_cmds`. Blocks v3 §4 A2 as written.**
+  `char hex[2 * MAX_PREFILL + 2]` is **1026 bytes**. The parse is
+  `sscanf(p, "%lx %lu %2048s", &cmd, &sz, hex)`, which permits **2049 bytes**.
+  A template field longer than 1025 characters smashes the stack.
+  Template length is `8 + 16n` characters for `n` requested indices, so the
+  overflow starts at **n >= 64**.
+  Not reachable today: `gen_templates.py` uses `MAX_INDEX = 32`, and the longest
+  live template is 520 characters.
+  **Reachable the moment `MAX_INDEX` is raised past 63.** The trigger is
+  `NV2080_CTRL_CMD_GPU_GET_INFO_V2` (`0x20800102`), driver size 524, capacity
+  **65** — it does not get clamped by its own `paramsSize` the way FB does.
+- **E6 — `--probe-mode` is parsed and then ignored on the size-scan path.**
+  `run_size_scan()` does not take the mode. Harmless today; misleading later.
+- **E7 — the size scan steps `s += 1` from 0 to `max_size`.** Cost is linear in
+  the accepted size, per command. Fine at the current sizes. A wider `--size-scan`
+  than 65536 gets expensive fast.
+
+**`gen_templates.py` (108 lines) — request templates.**
+Exists because a zeroed params buffer reads almost nothing from this ABI
+(`arch-findings` Finding 6). `make_template` writes `count = n`, then `n` pairs
+of `(index, 0)`.
+
+- **E2 — `MAX_PREFILL = 512` silently drops an oversized template.** In
+  `load_cmds`, the guard is `hl / 2 <= MAX_PREFILL`. On failure `prefill_len`
+  stays 0 and the sweep sends a **zeroed buffer**, which reads nothing. There is
+  no warning. A silent revert to the known-bad case is worse than an error.
+- **E3 — `make_template` can only request indices `1..n`, contiguously.** It
+  cannot request an arbitrary set. So reaching a high index means requesting
+  every index below it too, and paying for them in `paramsSize`.
+
+**`gen_sweep_list.py` (156 lines) — the safety filter.**
+Conservative and correct: a command is admitted only if it is positively a read,
+and any write-ish token rejects it. `_INTERNAL_` is denied. The probe file
+overrides header sizes with driver-measured sizes. This is the right precedence.
+
+- **E8 — `_EXEC` is in `DENY_TOKENS`.** So `NV2080_CTRL_CMD_GPU_EXEC_REG_OPS`
+  can never reach the sweeper through this path. v3 §4 A3 must add an explicit,
+  separate code path in `sweep_controls.c`. It cannot be done by editing a
+  command list. **This is correct behaviour and must not be relaxed** — widening
+  the filter to admit `_EXEC` would admit every other exec-class command too.
+
+**`extract_ctrl_table.py` (218 lines) — the static command table.**
+Measures `sizeof()` by compiling a probe and pruning what gcc rejects, rather
+than parsing C. That is the right call and it is unusually honest tooling.
+Skips `*_PARAMS_MESSAGE_ID` correctly — those are FINN tags whose small ordinals
+would otherwise collide with real low-numbered commands.
+
+**`noise_floor.py` (97 lines) — the A2 gate.**
+Compares two runs and reports the byte-stable fraction.
+
+- **E5 — the gate does not fail the process.** `total_ok == 0` exits 1, but
+  `stable_ratio < 0.5` only **prints** `GATE: FAIL`. A script or CI step that
+  checks the exit code will proceed past a failed gate. The documentation treats
+  this gate as a hard stop; the code treats it as advice.
+
+**`run_effect_map.py`, `classify_mig.py`, `effect_probe.cu`, `diff_ctrl_tables.py`**
+— read at survey level. No new findings beyond what `arch-findings-20260730.md`
+already records (Findings 6, 7, 8). `run_effect_map.py` emits both the
+op-vs-baseline and the adjacent-rung views; the rung-delta view is the usable one.
+
+### Phase 3 — cross-cutting
+
+1. **Every committed artifact under `out/` is stale.** All were measured against
+   555.42.02. `/proc/driver/nvidia/version` now reports **610.43.02**. Nothing in
+   the subsystem records the driver version it measured against, so nothing
+   detects this automatically. **This is the single most dangerous property of
+   the subsystem right now** — the files look authoritative and are not.
+2. **Missing piece: no provenance stamp.** No output file records driver version,
+   GPU model, or git SHA. Every other measurement discipline in the sibling
+   `gpu-virt/motivation` repo requires this. Add it.
+3. **Most likely bug site:** `load_cmds` (E1), and it is reachable by the very
+   next planned change.
+4. **Warn a new engineer first:** the three size caps that govern any template
+   change are independent and only one of them errors. In order of tightness for
+   `FB_GET_INFO_V2`: `paramsSize` 444 (55 indices), `MAX_PREFILL` 512 (63),
+   `hex[]` 1026 (63). Exceed the first and `make_template` silently clamps.
+   Exceed the second and the template is silently dropped. Exceed the third and
+   the process smashes its stack.
+
+### Step 0.3 — cross-reference: `ouroboros-plan-v3.md` vs the codebase
+
+| Plan step | State in repo | Verdict |
+|---|---|---|
+| A1 — re-probe ABI on 610.43.02 | Tooling exists and is unchanged. Re-run is a pure re-execution. | **Ready.** No code change. |
+| A2 — raise `MAX_INDEX` 32 -> 68 | `gen_templates.py:58`. | **CONFLICT — the plan is wrong.** See below. |
+| A3 — `EXEC_REG_OPS` probe | Not present. `_EXEC` is denied by the filter (E8). | **New code required** in `sweep_controls.c`. Cannot be a list edit. |
+| Lane B — colouring | Lives in `gpu-virt/motivation`, a different repo. | Out of scope for this repo's chunks. |
+| Lane C — firmware | Closed by `gsp-firmware-re-assessment.md`. | No work. |
+
+**The conflict, stated precisely.** Plan v3 §1.4 and §4 A2 say to raise
+`MAX_INDEX` from 32 to **68**, to reach `LTC_COUNT` (0x22=34), `LTS_COUNT`
+(0x23=35), `PSEUDO_CHANNEL_MODE` (0x25=37) and `LTC_MASK` (0x2b=43).
+
+Measured against the current code, 68 is both **unsafe and unnecessary**:
+
+| `MAX_INDEX` | FB_GET_INFO_V2 | GPU_GET_INFO_V2 | Result |
+|---|---|---|---|
+| 32 (today) | n=32, 520 chars | n=32, 520 chars | safe |
+| **55** | n=55, 888 chars | n=55, 888 chars | **safe, and reaches index 43** |
+| 63 | n=55, 888 chars | n=63, 1016 chars | safe, at the edge |
+| **68 (plan)** | n=55, 888 chars | **n=65, 1048 chars** | **stack overflow (E1)** |
+
+`FB_GET_INFO_V2` self-clamps at 55 because its driver `paramsSize` is 444
+(`4 + 55*8`). `GPU_GET_INFO_V2` does not — its size is 524, giving capacity 65.
+
+**`MAX_INDEX = 55` reaches all four target indices and overflows nothing.**
+
+**One open dependency.** The 610 SDK header declares
+`NV2080_CTRL_FB_INFO_MAX_LIST_SIZE = 0x80` (128 entries, 1028 bytes), but the
+555 probe measured an enforced `paramsSize` of 444 (55 entries). Now that the box
+runs 610, A1 may measure 1028. If it does, capacity rises to 128 and the E1
+overflow becomes reachable at a lower `MAX_INDEX` than the table above shows.
+**A1 must therefore run before A2 picks a number.** The plan already orders them
+that way; this review confirms the ordering is load-bearing, not cosmetic.

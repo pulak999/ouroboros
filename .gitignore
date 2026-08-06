@@ -3,3 +3,4 @@ gemini-key.txt
 
 # effect-map: compiled sweeper binary
 cuda-ioctl-map/tools/effectmap/sweep_controls
+__pycache__/

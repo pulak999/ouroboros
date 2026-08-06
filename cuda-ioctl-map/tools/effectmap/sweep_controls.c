@@ -122,7 +122,30 @@ enum probe_mode { PROBE_NORMAL, PROBE_BADSIZE, PROBE_BADOBJECT, PROBE_BADBOTH };
  * indices filled in it reports free framebuffer and tracks a 2 GiB allocation
  * exactly. A prefill lets the command list carry that request template.
  */
-#define MAX_PREFILL 512
+/*
+ * Request-template caps. Three numbers must stay in step:
+ *   MAX_PREFILL    bytes of template we store
+ *   MAX_HEX_CHARS  hex characters that encode them, exactly 2x
+ *   HEX_SCAN_FMT   the sscanf field width, one past the legal maximum so a
+ *                  too-long field is detectable instead of silently truncated
+ *
+ * The static assert catches the first two drifting. The field width has to be
+ * a literal, because the preprocessor cannot stringify an expression into a
+ * scanf conversion, so it is spelled out and guarded by the assert below it.
+ *
+ * Raised from 512 on 2026-08-06. The 610 SDK declares
+ * NV2080_CTRL_FB_INFO_MAX_LIST_SIZE = 128, a 1028-byte struct. The old cap
+ * silently dropped any template that large and swept with a zeroed buffer
+ * instead, which reads nothing. See code.md finding E2 at commit aaf7d18.
+ */
+#define MAX_PREFILL    2048
+#define MAX_HEX_CHARS  4096
+#define HEX_SCAN_FMT   "%lx %lu %4097s"
+_Static_assert(MAX_HEX_CHARS == 2 * MAX_PREFILL,
+               "MAX_HEX_CHARS must be exactly 2 * MAX_PREFILL");
+
+/* Templates that could not be used. Non-zero fails the run; see main(). */
+static int g_template_errors;
 
 struct cmd_entry {
     uint32_t cmd;
@@ -418,39 +441,81 @@ static int load_cmds(const char *path, struct cmd_entry *out, int max)
         return -1;
     }
     /* Must hold a full request template: 2 hex chars per byte, plus the cmd,
-     * the size and a trailing comment. A short buffer silently truncates the
-     * template and fgets then re-parses the tail as another command. */
-    char line[4 * MAX_PREFILL + 256];
+     * the size and a trailing comment. A short buffer truncates the template
+     * and fgets then re-parses the tail as another command, so an over-long
+     * line is reported and drained rather than silently split. */
+    char line[MAX_HEX_CHARS + 1024];
     int n = 0;
+    unsigned long lineno = 0;
+
     while (fgets(line, sizeof(line), f) && n < max) {
+        lineno++;
+        size_t ll = strlen(line);
+        if (ll == sizeof(line) - 1 && line[ll - 1] != '\n') {
+            fprintf(stderr,
+                    "[sweep] ERROR line %lu: longer than %zu bytes; raise the "
+                    "line buffer\n", lineno, sizeof(line) - 1);
+            g_template_errors++;
+            int c;
+            while ((c = fgetc(f)) != EOF && c != '\n') { }
+            continue;
+        }
+
         char *p = line;
         while (*p == ' ' || *p == '\t') p++;
         if (*p == '#' || *p == '\n' || *p == '\0') continue;
         unsigned long cmd, sz;
-        char hex[2 * MAX_PREFILL + 2];
+        char hex[MAX_HEX_CHARS + 3];
         hex[0] = '\0';
-        int nf = sscanf(p, "%lx %lu %2048s", &cmd, &sz, hex);
+        int nf = sscanf(p, HEX_SCAN_FMT, &cmd, &sz, hex);
         if (nf < 2) continue;
         if (sz > MAX_PARAM_SZ) {
             fprintf(stderr, "[sweep] skip 0x%08lx: size %lu over cap\n", cmd, sz);
             continue;
         }
-        out[n].cmd  = (uint32_t)cmd;
-        out[n].size = (uint32_t)sz;
-        out[n].prefill_len = 0;
+
+        uint32_t prefill_len = 0;
         /* Third field, when present and not a comment, is a hex request
          * template written into the head of the params buffer. */
         if (nf == 3 && hex[0] != '#' && hex[0] != '\0') {
             size_t hl = strlen(hex);
-            if (hl % 2 == 0 && hl / 2 <= MAX_PREFILL && hl / 2 <= sz) {
+            const char *why = NULL;
+            if (hl > MAX_HEX_CHARS)        why = "template longer than MAX_HEX_CHARS";
+            else if (hl % 2)               why = "odd number of hex characters";
+            else if (hl / 2 > MAX_PREFILL) why = "template exceeds MAX_PREFILL";
+            else if (hl / 2 > sz)          why = "template larger than the declared paramsSize";
+
+            if (!why) {
                 for (size_t i = 0; i < hl / 2; i++) {
                     unsigned byte;
-                    if (sscanf(hex + 2 * i, "%2x", &byte) != 1) { hl = 0; break; }
+                    if (sscanf(hex + 2 * i, "%2x", &byte) != 1) {
+                        why = "non-hex character in template";
+                        break;
+                    }
                     out[n].prefill[i] = (uint8_t)byte;
                 }
-                out[n].prefill_len = (uint32_t)(hl / 2);
             }
+
+            /*
+             * Never fall through to a zeroed buffer. A request-driven GET with
+             * count == 0 returns nothing, so the sweep would emit a normal
+             * looking row carrying no data at all — the exact silent failure in
+             * code.md finding E2. Skip the command and fail the run instead.
+             */
+            if (why) {
+                fprintf(stderr,
+                        "[sweep] ERROR line %lu cmd 0x%08lx: %s (%zu hex chars "
+                        "= %zu bytes, paramsSize %lu, cap %d)\n",
+                        lineno, cmd, why, hl, hl / 2, sz, MAX_PREFILL);
+                g_template_errors++;
+                continue;
+            }
+            prefill_len = (uint32_t)(hl / 2);
         }
+
+        out[n].cmd  = (uint32_t)cmd;
+        out[n].size = (uint32_t)sz;
+        out[n].prefill_len = prefill_len;
         n++;
     }
     fclose(f);
@@ -495,6 +560,17 @@ int main(int argc, char **argv)
     int ncmds = load_cmds(cmds_path, cmds, MAX_CMDS);
     if (ncmds < 0) return 1;
     fprintf(stderr, "[sweep] %d commands loaded from %s\n", ncmds, cmds_path);
+
+    /* Refuse to sweep with a partly-unusable command list. Runs before the
+     * ladder is built, so this path never touches the driver. */
+    if (g_template_errors) {
+        fprintf(stderr,
+                "[sweep] %d command(s) had an unusable request template and were "
+                "skipped.\n[sweep] Refusing to run: a zeroed params buffer reads "
+                "nothing (see code.md finding E2).\n", g_template_errors);
+        free(cmds);
+        return 3;
+    }
 
     if (size_scan_max > 0) {
         if (build_ladder(gpu) != 0) {
