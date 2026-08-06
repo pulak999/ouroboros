@@ -101,6 +101,9 @@ def main() -> None:
         for line in args.probe.read_text(encoding="utf-8").splitlines():
             if line.strip():
                 p = json.loads(line)
+                # Skip the provenance record; it is not a command.
+                if "cmd" not in p:
+                    continue
                 probe[int(p["cmd"], 16)] = p
 
     admitted, rejected = [], []

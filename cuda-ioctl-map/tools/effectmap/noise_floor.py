@@ -26,6 +26,10 @@ def load(path: Path) -> dict[str, dict]:
             if not line:
                 continue
             r = json.loads(line)
+            # Skip the provenance record emitted by sweep_controls; it
+            # carries driver/GPU metadata, not a command.
+            if "cmd" not in r:
+                continue
             rows[r["cmd"]] = r
     return rows
 
@@ -64,6 +68,7 @@ def main() -> None:
     print(f"[noise-floor] byte-identical (stable):             {n_stable}  ({stable_ratio:.1%})")
     print(f"[noise-floor] changed with nothing in between:      {n_noisy}")
     print()
+    gate_failed = False
     if total_ok == 0:
         print("[noise-floor] GATE: FAIL — no commands returned status 0, nothing to measure")
         sys.exit(1)
@@ -72,6 +77,7 @@ def main() -> None:
         print("[noise-floor]   Layer 1 is too noisy to carry the effect map alone per")
         print("[noise-floor]   effect-map-experiment-v1.md's stop condition. Fall back to")
         print("[noise-floor]   a curated stable subset, or lean on Layer 2 (RPC tracer).")
+        gate_failed = True
     else:
         print(f"[noise-floor] GATE: PASS — {stable_ratio:.1%} of fields are stable")
 
@@ -91,6 +97,12 @@ def main() -> None:
             "stable_commands": stable,
         }, indent=2), encoding="utf-8")
         print(f"\n[noise-floor] wrote {args.report}")
+
+    # The gate is a hard stop in effect-map-experiment-v1.md, so it must fail
+    # the process too. It used to print FAIL and return 0, which let any script
+    # walk straight past it. See code.md finding E5.
+    if gate_failed:
+        sys.exit(2)
 
 
 if __name__ == "__main__":

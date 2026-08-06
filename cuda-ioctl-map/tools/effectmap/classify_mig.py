@@ -148,6 +148,9 @@ def main() -> None:
         if not line.strip():
             continue
         r = json.loads(line)
+        # Skip the provenance record; it is not a command.
+        if "cmd" not in r:
+            continue
         probe[int(r["cmd"], 16)] = r
 
     observed = observed_commands(args.sniffed)

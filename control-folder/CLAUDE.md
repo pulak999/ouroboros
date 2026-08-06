@@ -199,6 +199,6 @@ re-run steps 1-3 before trusting any size.
 **capability**, not permission. Root would not help.
 
 **GPU split while two plans run.** A concurrent session is measuring memory
-bandwidth on **GPU 0** and its results are corrupted by any co-tenant CUDA
-context on that device. **Use GPU 1** from this repo. GPU 2 is untouched. That
+bandwidth on **GPU 1** and its results are corrupted by any co-tenant CUDA
+context on that device. **Use GPU 0** from this repo. GPU 2 is untouched. That
 work lives at `gpu-virt/motivation/experiments/m13-bw-colouring/ARCH-v2.md`.

@@ -68,6 +68,9 @@ def sweep(cmds: Path, out: Path) -> dict[str, dict]:
     for line in out.read_text(encoding="utf-8").splitlines():
         if line.strip():
             rec = json.loads(line)
+            # Skip the provenance record; it is not a command.
+            if "cmd" not in rec:
+                continue
             rows[rec["cmd"]] = rec
     return rows
 

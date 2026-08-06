@@ -43,6 +43,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <time.h>
 #include <unistd.h>
 
 /* ── NVIDIA UAPI structs (from sdk/nvidia/inc/nvos.h) ── */
@@ -340,6 +341,46 @@ static uint32_t object_for_cmd(uint32_t cmd)
 }
 
 /*
+ * Provenance. Every output file starts with one `_meta` record naming the
+ * driver it was measured against.
+ *
+ * This exists because the whole out/ tree was measured on 555.42.02, the box
+ * was upgraded to 610.43.02, and nothing detected it — the files still looked
+ * authoritative. Consumers skip any record without a "cmd" key.
+ */
+static void sanitise_json(char *s)
+{
+    for (char *p = s; *p; p++)
+        if (*p == '"' || *p == '\\' || *p < 0x20) *p = '_';
+}
+
+static void emit_meta(FILE *out, const char *tool, unsigned gpu,
+                      const char *cmds_path)
+{
+    char drv[256] = "unknown";
+    FILE *v = fopen("/proc/driver/nvidia/version", "r");
+    if (v) {
+        if (fgets(drv, sizeof(drv), v)) {
+            drv[strcspn(drv, "\r\n")] = '\0';
+            sanitise_json(drv);
+        }
+        fclose(v);
+    }
+
+    char path[512];
+    snprintf(path, sizeof(path), "%s", cmds_path ? cmds_path : "");
+    sanitise_json(path);
+
+    fprintf(out,
+            "{\"_meta\":{\"tool\":\"%s\",\"driver\":\"%s\",\"gpu\":%u,"
+            "\"cmds\":\"%s\",\"unix_time\":%lld}}\n",
+            tool, drv, gpu, path, (long long)time(NULL));
+    fflush(out);
+
+    fprintf(stderr, "[sweep] provenance: %s | gpu %u\n", drv, gpu);
+}
+
+/*
  * Size scan — recover the driver's own paramsSize for each command.
  *
  * control.c:445-456 looks the command up in the NVOC export table and compares
@@ -356,13 +397,15 @@ static uint32_t object_for_cmd(uint32_t cmd)
  * accepted size rather than issuing it a second time.
  */
 static int run_size_scan(const struct cmd_entry *cmds, int ncmds,
-                         const char *out_path, uint32_t max_size)
+                         const char *out_path, uint32_t max_size,
+                         unsigned gpu, const char *cmds_path)
 {
     FILE *out = fopen(out_path, "w");
     if (!out) {
         fprintf(stderr, "[sweep] open %s: %s\n", out_path, strerror(errno));
         return 1;
     }
+    emit_meta(out, "sweep_controls --size-scan", gpu, cmds_path);
     uint8_t *buf = calloc(1, max_size + 8);
     if (!buf) return 1;
 
@@ -577,7 +620,7 @@ int main(int argc, char **argv)
             fprintf(stderr, "[sweep] could not build the RM object ladder\n");
             return 1;
         }
-        return run_size_scan(cmds, ncmds, out_path, size_scan_max);
+        return run_size_scan(cmds, ncmds, out_path, size_scan_max, gpu, cmds_path);
     }
 
     if (build_ladder(gpu) != 0) {
@@ -590,6 +633,8 @@ int main(int argc, char **argv)
         fprintf(stderr, "[sweep] open %s: %s\n", out_path, strerror(errno));
         return 1;
     }
+
+    emit_meta(out, "sweep_controls", gpu, cmds_path);
 
     uint8_t *pbuf   = malloc(MAX_PARAM_SZ);
     char    *hexbuf = malloc(2 * MAX_PARAM_SZ + 1);

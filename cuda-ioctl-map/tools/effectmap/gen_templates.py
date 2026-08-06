@@ -53,9 +53,34 @@ INDEX_LIST_COMMANDS = {
     "0x20802401",  # NV2080_CTRL_CMD_THERMAL_SYSTEM_GET_INFO
 }
 
-# Highest index worth asking for. Indices above the driver's range are simply
-# reported as unsupported in their own slot; they do not fail the call.
-MAX_INDEX = 32
+# Highest index worth asking for.
+#
+# MEASURED 2026-08-06 on 610.43.02, GPU 0. The old comment here claimed
+# "indices above the driver's range are simply reported as unsupported in their
+# own slot; they do not fail the call". **That is false.** The driver validates
+# every index in the list, and if any one of them is out of range it returns
+# status 0x0 with the whole response zeroed — no data at all, no error.
+#
+# The cliff is exact:
+#     n <= 68  -> 35 populated data fields
+#     n >= 69  -> 0 populated data fields, status still 0x00000000
+#
+# 68 is 0x44, one past NV2080_CTRL_FB_INFO_INDEX_LTC_MASK_7 (0x43), the highest
+# index the 610 header defines. So ask for exactly the defined range and no
+# more. Raising this "just in case" silently destroys the measurement.
+#
+# Raised 32 -> 68 on 2026-08-06, after the 610.43.02 re-probe. On 555 the driver
+# enforced paramsSize 444 for FB_GET_INFO_V2, so capacity was 55 and anything
+# above that was clamped anyway. 610 enforces 1028, so the defined index space
+# is now reachable — including LTC_COUNT (0x22), LTS_COUNT (0x23),
+# PSEUDO_CHANNEL_MODE (0x25) and LTC_MASK (0x2b), which the old cap never asked
+# for.
+#
+# 68 indices = 4 + 68*8 = 548 bytes = 1096 hex characters. That fits
+# sweep_controls.c's MAX_PREFILL (2048) and MAX_HEX_CHARS (4096). Do not raise
+# this without re-checking both — test_effectmap.py enforces the relationship
+# by reading the C's own #defines.
+MAX_INDEX = 68
 
 
 NORMALISED = {f"0x{int(c, 16):08X}" for c in INDEX_LIST_COMMANDS}

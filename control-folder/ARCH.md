@@ -146,22 +146,62 @@ a replacement. `FB_GET_INFO_V2` already supplies the framebuffer topology throug
 the ordinary control path with no special permission. The register plane is what
 you reach for when the control path does not expose a field.
 
-## Framebuffer topology (measured, TU102, from the existing sweep)
+## Framebuffer and L2 topology — MEASURED, TU102, driver 610.43.02
 
-Decoded from `out/state_vector_run1.jsonl`, command `0x20801303`. Measured under
-555; re-measure under 610.
+Decoded from `out/state_vector_610_run1.jsonl`, command `0x20801303`
+(`FB_GET_INFO_V2`), `paramsSize` 1028, 68 indices requested, 35 populated.
+GPU 0, 2026-08-06.
 
-| Index | Field | Value |
-|---|---|---|
-| 0x04 | `PARTITION_COUNT` | 6 |
-| 0x19 | `FBP_COUNT` | 6 |
-| 0x14 | `PARTITION_MASK` | 0x3F |
-| 0x0b | `BUS_WIDTH` | 384 |
-| 0x1b | `L2CACHE_SIZE` | 6 MiB |
-| 0x0d | `RAM_TYPE` | 17 (GDDR6) |
-| 0x06 | `BANK_SWIZZLE_ALIGNMENT` | 64 KiB |
+### The memory-channel geometry
 
-Bus width, RAM size and L2 size match published TITAN RTX specifications, which
-validates the decode. `LTC_COUNT`, `LTS_COUNT`, `PSEUDO_CHANNEL_MODE` and
-`LTC_MASK` sit at indices 0x22-0x2b and are **not yet measured** — the current
-template stops at index 32.
+| Index | Field | Value | Reading |
+|---|---|---|---|
+| 0x04 | `PARTITION_COUNT` | **6** | FBPA count |
+| 0x19 | `FBP_COUNT` | **6** | framebuffer partitions |
+| 0x14 | `PARTITION_MASK` | 0x3F | all 6 enabled |
+| 0x1a | `FBP_MASK` | 0x3F | all 6 enabled |
+| 0x22 | `LTC_COUNT` | **12** | L2 cache controllers |
+| 0x23 | `LTS_COUNT` | **48** | L2 slices, so 4 per LTC |
+| 0x2b | `LTC_MASK` | 0xFFF | all 12 LTCs enabled |
+| 0x25 | `PSEUDO_CHANNEL_MODE` | **0** | GDDR6 pseudo-channel mode is **off** |
+| 0x24 | `L2CACHE_ONLY_MODE` | 0 | normal |
+| 0x0b | `BUS_WIDTH` | 384 | bits |
+| 0x1b | `L2CACHE_SIZE` | 6 MiB | 128 KiB per slice |
+| 0x0d | `RAM_TYPE` | 17 | GDDR6 |
+| 0x06 | `BANK_SWIZZLE_ALIGNMENT` | 64 KiB | |
+| 0x02 | `DRAM_PAGE_STRIDE` | 98304 | |
+| 0x07 | `RAM_SIZE` | 24 GiB | |
+
+`BUS_WIDTH`, `RAM_SIZE` and `L2CACHE_SIZE` match published TITAN RTX
+specifications exactly, which validates the decode.
+
+### What this settles
+
+The "6 partitions or 12 channels?" question has one answer at each level, and
+they are consistent:
+
+```
+6 FBP / 6 FBPA  ->  12 LTC (2 per FBP)  ->  48 LTS (4 per LTC)
+384-bit bus / 12 LTC = 32 bits per LTC  ->  12 x 32-bit channels
+```
+
+`m13-bw-colouring/PLAN.md`'s "expect 12 32-bit channels" is **correct**, and now
+measured rather than assumed.
+
+**The consequence for channel colouring.** The channel-relevant count is 12, and
+the slice-relevant count is 48. Neither is a power of two — both carry a factor
+of 3. So the address-to-channel map **cannot be a pure bit-slice**; it needs a
+modulo or a hash. A colouring scheme built on masking address bits will not
+partition these channels evenly. The block rule `(offset / B) % N` still works,
+with **N = 12 or 48**, not a power of two.
+
+**Practical instruction for Lane B E1:** sweep for periodicity at 12 and 48.
+Do not assume a power-of-two period.
+
+### The trap that produced this table
+
+`FB_GET_INFO_V2` accepts at most **68** indices on 610. Ask for 69 or more and
+the driver returns **status 0 with the whole response zeroed** — no data, no
+error. The cliff is exact and it is documented at `gen_templates.py`'s
+`MAX_INDEX`. Raising that constant "to be safe" silently destroys the
+measurement.
