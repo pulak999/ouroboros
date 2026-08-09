@@ -366,22 +366,39 @@ it is not a clean permission denial either.
 (`0x2080019D`), which embeds the ops array inline and avoids the embedded-pointer
 copy entirely, probes as **absent** on 610 (`0x56 NOT_SUPPORTED`).
 
-**Honest limitation: this does not yet distinguish two hypotheses.**
+**RESOLVED 2026-08-08.** Both hypotheses from the previous session are closed:
 
-1. The GSP allowlist refuses the register read.
-2. The params are subtly wrong, so the driver rejects before ever consulting the
-   allowlist.
+1. **Params-bug hypothesis: closed, ruled out.** Compiled a probe directly
+   against the vendored header and confirmed the hand-rolled struct in
+   `sweep_controls.c` is byte-exact: `sizeof(PARAMS) == 48`, `regOpCount` at
+   offset 20, `regOps` at offset 24, `grRouteInfo` (16 B) at offset 32,
+   `sizeof(REG_OP) == 32`. The request is correctly formed.
+2. **NVOC dispatch-level rejection: closed, ruled out.** The command's export
+   entry (`g_subdevice_nvoc.c:4081-4095`) carries
+   `flags = 0x10118 = NON_PRIVILEGED | GPU_LOCK_DEVICE_ONLY | API_LOCK_READONLY
+   | GSP_PLUGIN_FOR_VGPU_GSP`. `NON_PRIVILEGED` is explicitly set — non-admin
+   callers are permitted to reach the handler.
 
-Hypothesis 2 is live and should be eliminated first. The most likely cause is
-the **embedded-pointer copy path**: `regOps` is a `NvP64` the driver must copy
-in from user space, handled in
-`src/nvidia/src/kernel/rmapi/embedded_param_copy.c`. That file appeared in the
-regops grep and has **not been read yet**.
+**The actual gate:** `gpuValidateRegOffset_IMPL` (`gpu_access.c:1212`) checks
+`gpuGetUserRegisterAccessPermissions(pGpu, offset)`
+(`gpu_register_access_map.c:137`) — a real bitmap test, fully in the open
+driver. But the bitmap's *contents* are populated once, at GPU init, from an
+**internal-only** control call
+(`NV2080_CTRL_CMD_INTERNAL_GPU_GET_USER_REGISTER_ACCESS_MAP`, routed to the
+Physical RM) — the same shape as the MIG Tier-3 commands already catalogued.
+So the mechanism is open-source; the data that decides allow/deny is not.
 
-**Next step, precisely:** read `embedded_param_copy.c`'s handling of
-`NV2080_CTRL_CMD_GPU_EXEC_REG_OPS` and check what it requires — a flag, a
-non-zero `grRouteInfo`, a `regOpCount` bound, or an `NVOS54` flag bit that says
-"this params buffer contains embedded pointers". `NVOS54_PARAMETERS.flags` is
-currently sent as 0 by `rm_control()`; that is the first thing to suspect.
+A test with a wildly out-of-range offset (`0xFFFFFFF0`) produced the identical
+`0x1F` as `PMC_BOOT_0`, confirming this is a uniform permission wall, not
+per-offset validation.
 
+**Conclusion: Path A does not open from an unprivileged client on 610.43.02.**
+Not yet tested with root — worth trying on the rented A100, but
+`gpuValidateRegOffset_IMPL`'s permission branch is skipped only by
+`osIsAdministrator()`, so it may not help if the underlying map is genuinely
+restrictive rather than merely permission-gated.
+
+Full writeup with exact citations: `gsp-firmware-re-assessment.md` §6.4.
 Artifact: `tools/effectmap/out/reg_probe_610.jsonl`.
+
+**A3 is now closed** — no further action unless the A100 root test is wanted.

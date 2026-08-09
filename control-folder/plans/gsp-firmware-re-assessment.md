@@ -158,20 +158,85 @@ The output answers the real question: **which physical L2 slices and memory
 channels did the GSP assign to this (profile, placement) pair.** You get the
 firmware's decision without decrypting one byte of it.
 
-### 6.4 The open risk
+### 6.4 The open risk — MEASURED 2026-08-08, mechanism now precisely located
 
-Register-op validation is **not** in the open source. The Kernel RM forwards the
-ops to the GSP, and the GSP checks them against an allowlist that ships inside
-the encrypted region. So whether an unprivileged client may read LTC offsets is
-an **empirical** question, not a source question.
+Run on GPU 0, driver 610.43.02, four offsets including `PMC_BOOT_0` (`0x0`,
+certainly a real register) and a deliberately out-of-range value
+(`0xFFFFFFF0`): **all four return `0x1F NV_ERR_INVALID_ARGUMENT`, uniformly,
+with `regStatus` reading back `0x00` in every case.**
 
-Three outcomes, all informative:
+Two hypotheses were open when this was first written: a params bug on our side,
+or a GSP-side rejection. Both are now resolved by reading the actual gate,
+`gpuValidateRegOffset_IMPL`
+([gpu_access.c:1212](../../refs/open-gpu-kernel-modules/src/nvidia/src/kernel/gpu/gpu_access.c#L1212)):
+
+```c
+if (offset > (maxBar0Size - 4))
+    return NV_ERR_INVALID_ARGUMENT;
+
+if (!bSkipPermissionValidation && !osIsAdministrator() &&
+    !gpuGetUserRegisterAccessPermissions(pGpu, offset))
+    return NV_ERR_INSUFFICIENT_PERMISSIONS;
+```
+
+**The params-bug hypothesis is closed.** Compiled a probe directly against the
+vendored header (not the hand-rolled struct in `sweep_controls.c`) and confirmed
+byte-exact agreement: `sizeof(NV2080_CTRL_GPU_EXEC_REG_OPS_PARAMS) == 48`,
+`regOpCount` at offset 20, `regOps` at offset 24, `grRouteInfo` (16 bytes) at
+offset 32, `sizeof(NV2080_CTRL_GPU_REG_OP) == 32`. The request the probe sends
+is correct.
+
+**The class-level access-rights hypothesis is closed.** The NVOC dispatch entry
+for this command
+([g_subdevice_nvoc.c:4081-4095](../../refs/open-gpu-kernel-modules/src/nvidia/generated/g_subdevice_nvoc.c#L4081))
+carries `flags = 0x10118`, which decodes to
+`RMCTRL_FLAGS_NON_PRIVILEGED (0x8) | RMCTRL_FLAGS_GPU_LOCK_DEVICE_ONLY (0x10) |
+RMCTRL_FLAGS_API_LOCK_READONLY (0x100) | RMCTRL_FLAGS_GSP_PLUGIN_FOR_VGPU_GSP
+(0x10000)`
+([control.h:199-287](../../refs/open-gpu-kernel-modules/src/nvidia/inc/kernel/rmapi/control.h#L199)).
+`NON_PRIVILEGED` is explicitly set — the dispatch layer permits a non-admin
+caller to reach the handler. The rejection is not happening here either.
+
+**What remains is `gpuGetUserRegisterAccessPermissions_IMPL`
+([gpu_register_access_map.c:137](../../refs/open-gpu-kernel-modules/src/nvidia/src/kernel/gpu/gpu_register_access_map.c#L137)),
+and its data source is genuinely closed** — not because the *check* is hidden
+(it is a plain bitmap test, fully in the open driver), but because the bitmap's
+**contents** are not. The map is populated once, at GPU init, from an
+**internal-only** control call:
+
+```c
+pRmApi->Control(pRmApi, pGpu->hInternalClient, pGpu->hInternalSubdevice,
+    NV2080_CTRL_CMD_INTERNAL_GPU_GET_USER_REGISTER_ACCESS_MAP, pParams, ...);
+```
+([gpu_register_access_map.c:245](../../refs/open-gpu-kernel-modules/src/nvidia/src/kernel/gpu/gpu_register_access_map.c#L245),
+via `GPU_GET_PHYSICAL_RMAPI`.) This is the same shape as the MIG Tier-3
+commands already catalogued in `mig-command-classification.md` — internal,
+routed to the Physical RM, not reachable or inspectable from a userspace
+ioctl. So the original framing ("the GSP checks a closed allowlist") was
+right in substance and now has an exact call chain behind it, not just an
+inference.
+
+Two proximate causes converge on the same observed behaviour, and the open
+source cannot distinguish them without a debug build:
+
+1. The map is populated with a real, restrictive bitmap that denies ordinary
+   userspace clients broadly, including `PMC_BOOT_0`.
+2. `pGpu->userRegisterAccessMapSize` came back 0 ("unsupported for this chip"),
+   the map stays `NULL`, and `gpuGetUserRegisterAccessPermissions_IMPL`'s
+   `NV_ASSERT_FAILED` branch returns `NV_FALSE` unconditionally
+   ([gpu_register_access_map.c:141-151](../../refs/open-gpu-kernel-modules/src/nvidia/src/kernel/gpu/gpu_register_access_map.c#L141)).
+
+Either way, the conclusion for this project is the same: **Path A does not open
+from an unprivileged client on this driver.** Root does not obviously fix case
+1 either — `gpuValidateRegOffset_IMPL`'s permission branch is skipped only via
+`osIsAdministrator()`, worth testing on the rented A100 where root is available,
+but not assumed to work.
 
 | Result | Meaning | Next move |
 |---|---|---|
 | returns data | Path A is fully open | run the diff on the A100 |
-| `INSUFFICIENT_PERMISSIONS` | needs admin | you have root on the rented A100 anyway |
-| offset rejected | LTC is off the allowlist | fall back to the contention probe alone |
+| `INSUFFICIENT_PERMISSIONS` (0x1B) | clean permission denial | root may fix it |
+| **`INVALID_ARGUMENT` (0x1F), measured** | permission denial wrapped into a generic code by `gpuValidateRegOps`'s transactional-return path — see above | test with root on the A100; if still denied, fall back to the contention probe alone |
 
 ### 6.5 Why this is the better result for the paper
 
