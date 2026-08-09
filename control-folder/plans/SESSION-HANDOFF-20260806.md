@@ -32,12 +32,62 @@ Commits: `63632dd` (parser hardening + tests + CI), `6eb9e19` (A1 re-probe + A2
 geometry), `4cd91b1` (MIG regen), `66d526a` + `a02b729` (A3, implementation
 then root-cause close), `0efe3de` (rpc_tracer re-pin + B3 script).
 
-**Next session: start Lane B.** It lives in a different repo —
-`gpu-virt/motivation/experiments/m13-bw-colouring/`. See §6 item 5 below. The
-measured channel geometry from A2 (12 channels, 48 slices, neither a power of
-two) is a direct input to Lane B's E1 sweep range and is not yet consumed
-there — check whether `m13-bw-colouring/PLAN.md` or `ARCH-v2.md` need updating
-with it before writing `colour_probe`.
+**Lane B — DO NOT START IT. It is already being driven live by a separate
+session.** Checked 2026-08-08 23:50: a distinct Claude Code process (PID
+37403) is running inside a **locked git worktree**
+(`gpu-virt/motivation/.claude/worktrees/m13-bw-colouring/`, branch
+`worktree-m13-bw-colouring`) with an active `colour_probe` process on **GPU
+1** (confirmed via `nvidia-smi --query-compute-apps`). This is not something
+I started — it is a second, independent, long-running session (118+ CPU
+minutes) that set up its own worktree specifically to isolate this work.
+
+**Both sides independently built the same ownership split** — I never
+coordinated this with them, it fell out of the user's separate instructions to
+each session: I own `ouroboros/` + GPU 0; they own
+`gpu-virt/motivation/experiments/m13-bw-colouring/` + GPU 1.
+`ouroboros-arch-v2-contention.md` even carries their own note: *"File
+ownership. `ouroboros/control-folder/` belongs to the other session... do not
+write into that directory from this plan."* Respect the same boundary in
+reverse: **do not write into `gpu-virt/motivation`, worktree or main tree,
+from an Ouroboros session.** Reading is fine and useful (see below); writing
+risks corrupting a live run or conflicting with a live commit.
+
+**What they've already found (read from their `RESULTS.md`, worktree commit
+`efe4b87`, read-only):**
+- E1 gate: signal PASS, SNR 28.2x (need ≥3). But **page-independence FAILS** —
+  same 2 MiB page correlates at r=+0.954 across independent runs; different
+  pages correlate at r≈0.1–0.35. The channel hash reads physical bits
+  [10:34]; a 2 MiB page only pins [20:0], so 14 of 25 relevant bits change per
+  allocation.
+- **Their `PLAN.md` E2 (offset-only colouring) is dead by measurement, not
+  argument.** What survives: *self-calibrating, per-allocation* colouring —
+  measure the mapping you were actually given, no root, no physical
+  addresses, no kernel module (unlike SGDRC's actual approach).
+- Their periodicity gate (Gate 2) separately **failed** — best autocorrelation
+  0.21–0.35, disagreeing periods per page. This **confirms** Lane A's own A2
+  finding: LTC_COUNT=12, LTS_COUNT=48, neither a power of two, so SGDRC §3.2
+  predicts a genuinely non-linear hash with no clean period at all — two
+  independent instruments (driver topology query, empirical stride sweep)
+  converged on the same structural fact. Written up in `ARCH.md`'s "Superseded
+  2026-08-08" note (commit after `0efe3de`) — my own earlier instruction there
+  ("sweep for periodicity at 12 and 48") was wrong in exactly this informative
+  way, and I corrected it.
+- Chunk 4 (their latest commit, `efe4b87`, minutes before this check): a
+  co-tenant guard for `colour_probe` — polls `nvidia-smi --query-compute-apps`
+  before/during/after each run, rejects if any other PID is on the assigned
+  GPU. Honestly documents its own gap: a run under ~0.64s can complete inside
+  one 2s poll tick and a same-length intruder was confirmed (empirically, not
+  assumed) to slip past undetected.
+- At the moment I checked, they were running a footprint-cost sweep (`for FP
+  in 8388608 33554432 134217728`) — almost certainly characterizing the
+  `O(slots)` per-page calibration cost their RESULTS.md flags as the one open
+  question on the self-calibrating approach.
+
+**If you want Lane B to move faster:** either wait for that session to finish
+(check `git -C gpu-virt/motivation/.claude/worktrees/m13-bw-colouring log` and
+whether the worktree lock is still held), or explicitly tell a *fresh* session
+to take over that specific worktree — do not have an Ouroboros-repo session
+(this one) touch it.
 
 ---
 
