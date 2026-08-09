@@ -13,23 +13,31 @@ bandwidth on GPU 1; GPU 2 is untouched).
 
 ---
 
-## 0. STATUS AT HANDOFF
+## 0. STATUS AT HANDOFF (updated 2026-08-08 — Lane A is COMPLETE)
 
-Chunks 1–3 are **committed and pushed**. A1 and A2 are **complete with results**.
-A3 is **implemented and run, with a negative result that needs one more step**.
+All of `ouroboros-plan-v3.md` Lane A is done, tested, and pushed. Six commits,
+`63632dd`..`0efe3de` on `effect-map-experiment-v1`.
 
 | Job | State |
 |---|---|
-| A0 provenance | done, pushed |
-| A1 re-probe on 610 | **done, results in §4** |
-| A2 geometry | **done — LTC_COUNT 12, LTS_COUNT 48, published to ARCH.md** |
-| MIG classification regen | done, pushed, now self-labelling |
-| A3 EXEC_REG_OPS | **implemented; returns 0x1F uniformly — see §4.6** |
-| rpc_tracer re-pin | not started |
-| Lane B | not started |
+| A0 provenance | **done** — every sweep output opens with a `_meta` record |
+| A1 re-probe on 610 | **done** — full ABI diff in §4.2 |
+| A2 geometry | **done** — LTC_COUNT 12, LTS_COUNT 48, LTC_MASK 0xFFF, published to ARCH.md |
+| MIG classification regen | **done** — now self-labels its driver version from provenance |
+| A3 EXEC_REG_OPS | **done, CLOSED** — root cause fully traced (§4.6): the CPU-side gate is open source, but its allowlist *data* comes from an internal-only control call to the Physical RM. Path A does not open unprivileged on 610.43.02. |
+| rpc_tracer re-pin | **done** — 610.43.02, patches re-verified with `patch --dry-run --verbose`, `setup_experiment_b.sh`/`correlate_rpc_trace.py` committed (were tested but never git-added) |
+| Lane B (bandwidth colouring) | **not started — this is what's next** |
 
-Commits: `63632dd` (chunk 1), `6eb9e19` (A1+A2), `4cd91b1` (MIG regen), plus the
-A3 commit if it landed.
+Commits: `63632dd` (parser hardening + tests + CI), `6eb9e19` (A1 re-probe + A2
+geometry), `4cd91b1` (MIG regen), `66d526a` + `a02b729` (A3, implementation
+then root-cause close), `0efe3de` (rpc_tracer re-pin + B3 script).
+
+**Next session: start Lane B.** It lives in a different repo —
+`gpu-virt/motivation/experiments/m13-bw-colouring/`. See §6 item 5 below. The
+measured channel geometry from A2 (12 channels, 48 slices, neither a power of
+two) is a direct input to Lane B's E1 sweep range and is not yet consumed
+there — check whether `m13-bw-colouring/PLAN.md` or `ARCH-v2.md` need updating
+with it before writing `colour_probe`.
 
 ---
 
