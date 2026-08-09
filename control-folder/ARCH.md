@@ -195,8 +195,39 @@ modulo or a hash. A colouring scheme built on masking address bits will not
 partition these channels evenly. The block rule `(offset / B) % N` still works,
 with **N = 12 or 48**, not a power of two.
 
-**Practical instruction for Lane B E1:** sweep for periodicity at 12 and 48.
-Do not assume a power-of-two period.
+**Superseded 2026-08-08 — Lane B measured this, and the periodicity approach
+itself fails, for the reason predicted here.** Read-only cross-check against
+`gpu-virt/motivation` (a separate repo/session; not edited from here — see
+`ouroboros-arch-v2-contention.md`'s file-ownership note). Their E1
+(`experiments/m13-bw-colouring/RESULTS.md`) ran a stride-autocorrelation sweep
+and reports: *"Gate 2 (periodicity) failed — best per-page autocorrelation is
+0.21 / 0.30 / 0.35, and the best period disagrees across pages (6144 / 4096 /
+6656 B)."*
+
+This is not a contradiction of the measurement above — it is the **same
+non-power-of-two fact, showing up a second, independent way.** "Neither 12 nor
+48 is a power of two" doesn't just mean the period isn't 12 or 48; per SGDRC
+§3.2 (cited in their `E3-SGDRC-FINDINGS.md`), a channel count that isn't a
+power of two produces a genuinely **non-linear** hash, which does not present
+as *any* clean autocorrelation peak — sweeping harder or at more periods
+would not have fixed this. Lane A's driver-reported topology and Lane B's
+independent stride sweep converge on the same structural fact from two
+unrelated instruments.
+
+**What Lane B found instead (their real result, better than a periodicity
+number):** the hash also fails to survive a **physical page change** — same
+2 MiB page, two independent runs correlate at r=+0.954; different pages
+correlate at r≈0.1–0.35. Their reading: the channel hash consumes physical
+bits [10:34], a 2 MiB page only pins bits [20:0], so 14 of 25 relevant bits
+change per allocation. A virtual offset therefore cannot predict a channel —
+periodicity was never going to appear because the mapping isn't a fixed
+function of virtual address at all. Their `PLAN.md` E2 (offset-only
+colouring) is dead by this measurement; what survives is **self-calibrating,
+per-allocation colouring** (measure the mapping you were actually given,
+each time), needing no root and no physical addresses. See their
+`RESULTS.md` for the full measurement, including the two documented false
+starts (an nvcc-folded chase step, and a pinned interferer that coalesced to
+no traffic) that would otherwise have produced plausible-looking noise.
 
 ### The trap that produced this table
 
