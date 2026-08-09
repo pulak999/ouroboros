@@ -11,6 +11,24 @@ never compiled or run — there is no rented box yet.** Read the whole file
 before applying anything. See the mechanism analysis this is built on:
 `control-folder/plans/mig-rpc-mechanism-notes.md`.
 
+**Re-pinned 610.43.02 (2026-08-08).** hulk moved from 555.42.02 to 610.43.02;
+both patches were re-verified against `refs/open-gpu-kernel-modules` at the
+610.43.02 tag with `patch -p1 --dry-run --verbose`. Both apply — `0001` needs a
+32-35 line context offset (the surrounding function moved slightly between
+versions, content unchanged where it matters), `0002` needs a 13 line offset on
+its second hunk. Neither is a content conflict. If you rent a box running a
+different driver version, re-run the dry-run check against that exact tag
+before trusting these offsets again — a clean `patch` dry-run costs nothing and
+catches drift before it costs rental time.
+
+**Two scripts in this directory automate the manual steps below:**
+`setup_experiment_b.sh` runs the whole "Deploy" section (clone, patch, build,
+insmod, verify) with a fail-fast check after every step; `correlate_rpc_trace.py`
+runs the "Running the actual experiment" decode step and joins it against
+`../out/mig_classification.json` instead of a manual cross-reference. Both are
+still unrun against real hardware — the manual steps below are the ground
+truth if a script and this doc ever disagree.
+
 ## Why this needs a different machine than hulk
 
 hulk runs the **proprietary** module (`modinfo nvidia` → `license: NVIDIA`).
@@ -71,7 +89,7 @@ step, your `kernel_gsp.c` edit is silently ignored and the resulting
 
 ```bash
 # 1. Clone the exact tag these patches were verified against.
-git clone --branch 555.42.02 https://github.com/NVIDIA/open-gpu-kernel-modules.git
+git clone --branch 610.43.02 https://github.com/NVIDIA/open-gpu-kernel-modules.git
 cd open-gpu-kernel-modules
 
 # 2. Apply both patches (from this repo).
@@ -87,9 +105,11 @@ ls -la src/nvidia/_out/Linux_x86_64_*/nv-kernel.o   # must exist and be freshly 
 make modules -j$(nproc)
 
 # 5. Install the matching *proprietary userspace* components too (libcuda,
-#    nvidia-smi, etc. must be 555.42.02 to match). Get the matching .run
-#    installer from NVIDIA, run it with --no-kernel-module (you're supplying
-#    your own kernel module from steps 1-4).
+#    nvidia-smi, etc. must be the SAME version as the open-source tag you
+#    cloned in step 1, whatever that is on the day you run this — 610.43.02
+#    is what hulk runs as of 2026-08-06, not a fixed requirement). Get the
+#    matching .run installer from NVIDIA, run it with --no-kernel-module
+#    (you're supplying your own kernel module from steps 1-4).
 
 # 6. Load it.
 sudo rmmod nvidia_uvm nvidia_drm nvidia_modeset nvidia 2>/dev/null
